@@ -12,5 +12,16 @@
   },
   "devDependencies": {
     "nodemon": "^3.1.10"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/theritikkk/WebChat.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/theritikkk/WebChat/issues"
+  },
+  "homepage": "https://github.com/theritikkk/WebChat#readme"
 }
