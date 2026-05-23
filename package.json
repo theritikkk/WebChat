@@ -1,41 +1,25 @@
 {
   "name": "webchat",
   "version": "1.0.0",
-  "description": "Chatting App",
-  "main": "index.js",
-  "type": "module",
+  "private": true,
+  "description": "Real-time multi-room chat — microservices monorepo",
+  "workspaces": [
+    "services/*",
+    "apps/*"
+  ],
   "scripts": {
-    "dev": "nodemon index.js"
+    "dev": "concurrently -k -n gateway,auth,messages,chat -c blue,green,yellow,magenta \"npm run dev -w @webchat/gateway\" \"npm run dev -w @webchat/auth\" \"npm run dev -w @webchat/messages\" \"npm run dev -w @webchat/chat\"",
+    "dev:client": "npm run dev -w @webchat/client"
   },
-  "dependencies": {
-    "bcrypt": "^6.0.0",
-    "cookie-parser": "^1.4.7",
-    "cors": "^2.8.5",
-    "dotenv": "^17.2.2",
-    "express": "^5.1.0",
-    "express-session": "^1.18.2",
-    "express-validator": "^7.2.1",
-    "helmet": "^8.1.0",
-    "jsonwebtoken": "^9.0.2",
-    "mongoose": "^8.18.0",
-    "morgan": "^1.10.1",
-    "multer": "^2.0.2",
-    "pg": "^8.16.3",
-    "sequelize": "^6.37.7",
-    "socket.io": "^4.8.1"
-  },
-  "devDependencies": {
-    "nodemon": "^3.1.10"
+  "engines": {
+    "node": ">=20"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/theritikkk/WebChat.git"
   },
-  "keywords": [],
-  "author": "",
   "license": "ISC",
-  "bugs": {
-    "url": "https://github.com/theritikkk/WebChat/issues"
-  },
-  "homepage": "https://github.com/theritikkk/WebChat#readme"
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
 }

@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "target": "ES2022",
+    "ignoreDeprecations": "6.0",
+    "checkJs": false,
+    "allowJs": true,
+    "resolveJsonModule": true
+  },
+  "include": [
+    "services/**/*.js",
+    "apps/client/**/*.js",
+    "apps/client/**/*.jsx"
+  ],
+  "exclude": ["node_modules", "**/dist"]
+}

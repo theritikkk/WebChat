@@ -1,0 +1,41 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: webchat
+
+resources:
+  - namespace.yaml
+  - postgres.yaml
+  - mongo.yaml
+  - redis.yaml
+  - auth.yaml
+  - messages.yaml
+  - chat.yaml
+  - gateway.yaml
+  - ingress.yaml
+
+secretGenerator:
+  - name: webchat-db
+    literals:
+      - POSTGRES_USER=webchat
+      - POSTGRES_PASSWORD=webchat
+      - POSTGRES_DB=webchat
+    options:
+      disableNameSuffixHash: true
+  - name: webchat-app
+    literals:
+      - JWT_SECRET=replace-me-use-openssl-rand-hex-32
+      - DATABASE_URL=postgres://webchat:webchat@postgres:5432/webchat
+    options:
+      disableNameSuffixHash: true
+
+configMapGenerator:
+  - name: webchat-config
+    literals:
+      - AUTH_SERVICE_URL=http://auth:3001
+      - MESSAGES_SERVICE_URL=http://messages:3003
+      - REDIS_URL=redis://redis:6379
+      - MONGO_URI=mongodb://mongo:27017/webchat
+      - CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,http://webchat.local
+    options:
+      disableNameSuffixHash: true
