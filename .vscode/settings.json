@@ -1,0 +1,33 @@
+{
+  "files.exclude": {
+    "**/node_modules": true,
+    "**/.git": false
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "package-lock.json": true
+  },
+  "files.watcherExclude": {
+    "**/node_modules/**": true
+  },
+  "explorer.fileNesting.enabled": true,
+  "explorer.fileNesting.patterns": {
+    "package.json": "package-lock.json, .env.example",
+    "docker-compose.yml": "docker-compose.*.yml",
+    "README.md": "LICENSE, CHANGELOG.md"
+  },
+  "javascript.preferences.importModuleSpecifierEnding": "js",
+  "npm.packageManager": "npm",
+  "editor.tabSize": 2,
+  "editor.insertSpaces": true,
+  "[javascript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[json]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[yaml]": {
+    "editor.defaultFormatter": "redhat.vscode-yaml"
+  },
+  "postman.settings.dotenv-detection-notification-visibility": false
+}

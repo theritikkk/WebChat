@@ -1,0 +1,163 @@
+# ── Message Worker Deployment ─────────────────────────────────────────────────
+# Consumes from RabbitMQ → persists to MongoDB + Elasticsearch
+# Scale replicas independently of the chat service for throughput tuning
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: message-worker
+  namespace: webchat
+  labels:
+    app: message-worker
+    tier: worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: message-worker
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: message-worker
+        tier: worker
+    spec:
+      terminationGracePeriodSeconds: 60   # finish in-flight messages before shutdown
+      containers:
+        - name: message-worker
+          image: ghcr.io/theritikkk/webchat/message-worker:latest
+          imagePullPolicy: Always
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: RABBITMQ_URL
+              valueFrom:
+                secretKeyRef:
+                  name: webchat-rabbitmq
+                  key: RABBITMQ_URL
+            - name: MONGO_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: webchat-config
+                  key: MONGO_URI
+            - name: ELASTICSEARCH_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: webchat-config
+                  key: ELASTICSEARCH_URL
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          # No HTTP port — this is a pure queue consumer
+          # Liveness: process is alive if it hasn't crashed
+          livenessProbe:
+            exec:
+              command: ["node", "-e", "process.exit(0)"]
+            initialDelaySeconds: 30
+            periodSeconds: 30
+---
+# ── Uploads Service Deployment + ClusterIP Service ───────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: uploads
+  namespace: webchat
+  labels:
+    app: uploads
+    tier: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: uploads
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: uploads
+        tier: backend
+    spec:
+      containers:
+        - name: uploads
+          image: ghcr.io/theritikkk/webchat/uploads:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3004
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT_UPLOADS
+              value: "3004"
+            - name: MINIO_ENDPOINT
+              value: "minio"
+            - name: MINIO_PORT
+              value: "9000"
+            - name: MINIO_USE_SSL
+              value: "false"
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: webchat-minio
+                  key: MINIO_ACCESS_KEY
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: webchat-minio
+                  key: MINIO_SECRET_KEY
+            - name: MINIO_BUCKET
+              value: "webchat-uploads"
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: webchat-app
+                  key: JWT_SECRET
+            - name: CORS_ORIGINS
+              valueFrom:
+                configMapKeyRef:
+                  name: webchat-config
+                  key: CORS_ORIGINS
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3004
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3004
+            initialDelaySeconds: 15
+            periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: uploads
+  namespace: webchat
+  labels:
+    app: uploads
+spec:
+  selector:
+    app: uploads
+  ports:
+    - name: http
+      port: 3004
+      targetPort: 3004

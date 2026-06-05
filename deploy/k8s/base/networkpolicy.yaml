@@ -1,0 +1,201 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: webchat
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway-policy
+  namespace: webchat
+spec:
+  podSelector:
+    matchLabels:
+      app: gateway
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow traffic from ingress controllers (public)
+    - {}
+  egress:
+    # Allow gateway to connect to auth and messages services
+    - to:
+        - podSelector:
+            matchLabels:
+              app: auth
+      ports:
+        - port: 3001
+    - to:
+        - podSelector:
+            matchLabels:
+              app: messages
+      ports:
+        - port: 3003
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: chat-policy
+  namespace: webchat
+spec:
+  podSelector:
+    matchLabels:
+      app: chat
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow public WebSocket/HTTP connections from Ingress
+    - {}
+  egress:
+    # Allow chat to connect to messages (HTTP API), redis (pubsub adapter/cache), auth (HTTP verification)
+    - to:
+        - podSelector:
+            matchLabels:
+              app: messages
+      ports:
+        - port: 3003
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - port: 6379
+    - to:
+        - podSelector:
+            matchLabels:
+              app: auth
+      ports:
+        - port: 3001
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: auth-policy
+  namespace: webchat
+spec:
+  podSelector:
+    matchLabels:
+      app: auth
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow ingress from gateway, chat, and messages
+    - from:
+        - podSelector:
+            matchLabels:
+              app: gateway
+        - podSelector:
+            matchLabels:
+              app: chat
+        - podSelector:
+            matchLabels:
+              app: messages
+  egress:
+    # Allow auth to connect to postgres
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - port: 5432
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: messages-policy
+  namespace: webchat
+spec:
+  podSelector:
+    matchLabels:
+      app: messages
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow ingress from gateway and chat
+    - from:
+        - podSelector:
+            matchLabels:
+              app: gateway
+        - podSelector:
+            matchLabels:
+              app: chat
+  egress:
+    # Allow messages to connect to mongo, elasticsearch, redis (cache), and auth (token/room validation)
+    - to:
+        - podSelector:
+            matchLabels:
+              app: mongo
+      ports:
+        - port: 27017
+    - to:
+        - podSelector:
+            matchLabels:
+              app: elasticsearch
+      ports:
+        - port: 9200
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - port: 6379
+    - to:
+        - podSelector:
+            matchLabels:
+              app: auth
+      ports:
+        - port: 3001
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: db-policy
+  namespace: webchat
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In [postgres, mongo, redis, elasticsearch]
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow databases to accept connections from their respective services
+    - from:
+        - podSelector:
+            matchLabels:
+              app: auth
+      ports:
+        - port: 5432
+    - from:
+        - podSelector:
+            matchLabels:
+              app: messages
+      ports:
+        - port: 27017
+        - port: 9200
+    - from:
+        - podSelector:
+            matchLabels:
+              app: chat
+      ports:
+        - port: 6379
+    - from:
+        - podSelector:
+            matchLabels:
+              app: messages
+      ports:
+        - port: 6379
+  egress:
+    # Databases usually don't initiate egress connections except internally/DNS
+    - {}

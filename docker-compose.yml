@@ -1,16 +1,17 @@
 services:
+  # ── Databases ────────────────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: webchat
-      POSTGRES_PASSWORD: webchat
-      POSTGRES_DB: webchat
+      POSTGRES_USER: ${POSTGRES_USER:-webchat}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-webchat}
+      POSTGRES_DB: ${POSTGRES_DB:-webchat}
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U webchat -d webchat"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-webchat} -d ${POSTGRES_DB:-webchat}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -37,6 +38,241 @@ services:
       timeout: 3s
       retries: 5
 
+  # ── Message Queue — RabbitMQ ──────────────────────────────────────────────────
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-webchat}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-webchat}
+    ports:
+      - "5672:5672"    # AMQP
+      - "15672:15672"  # Management UI  →  http://localhost:15672
+    volumes:
+      - rabbitdata:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  # ── Object Storage — MinIO ────────────────────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER:     ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    ports:
+      - "9000:9000"    # S3 API
+      - "9001:9001"    # MinIO Console  →  http://localhost:9001
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Elasticsearch + Kibana ────────────────────────────────────────────────────
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health | grep -qv '\"status\":\"red\"'"]
+      interval: 15s
+      timeout: 10s
+      retries: 8
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.13.4
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    profiles:
+      - kibana
+
+  # ── Application Services ──────────────────────────────────────────────────────
+  auth:
+    build:
+      context: .
+      dockerfile: services/auth/Dockerfile
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgres://${POSTGRES_USER:-webchat}:${POSTGRES_PASSWORD:-webchat}@postgres:5432/${POSTGRES_DB:-webchat}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_ACCESS_EXPIRES=${JWT_ACCESS_EXPIRES:-15m}
+      - JWT_REFRESH_EXPIRES=${JWT_REFRESH_EXPIRES:-7d}
+      - PORT_AUTH=3001
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173}
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - app
+
+  messages:
+    build:
+      context: .
+      dockerfile: services/messages/Dockerfile
+    environment:
+      - NODE_ENV=production
+      - MONGO_URI=mongodb://mongo:27017/webchat
+      - REDIS_URL=redis://redis:6379
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - JWT_SECRET=${JWT_SECRET}
+      - AUTH_SERVICE_URL=http://auth:3001
+      - PORT_MESSAGES=3003
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173}
+    ports:
+      - "3003:3003"
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    profiles:
+      - app
+
+  # ── Message Worker (RabbitMQ consumer) ───────────────────────────────────────
+  message-worker:
+    build:
+      context: .
+      dockerfile: services/message-worker/Dockerfile
+    environment:
+      - NODE_ENV=production
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-webchat}:${RABBITMQ_PASS:-webchat}@rabbitmq:5672
+      - MONGO_URI=mongodb://mongo:27017/webchat
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+    depends_on:
+      mongo:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    deploy:
+      replicas: 2  # Run 2 workers for parallel processing
+      restart_policy:
+        condition: on-failure
+        max_attempts: 5
+    profiles:
+      - app
+
+  # ── Uploads Service (MinIO presigning) ────────────────────────────────────────
+  uploads:
+    build:
+      context: .
+      dockerfile: services/uploads/Dockerfile
+    environment:
+      - NODE_ENV=production
+      - MINIO_ENDPOINT=minio
+      - MINIO_PORT=9000
+      - MINIO_USE_SSL=false
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
+      - MINIO_BUCKET=${MINIO_BUCKET:-webchat-uploads}
+      - JWT_SECRET=${JWT_SECRET}
+      - PORT_UPLOADS=3004
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173}
+    ports:
+      - "3004:3004"
+    depends_on:
+      minio:
+        condition: service_healthy
+    profiles:
+      - app
+
+  chat:
+    build:
+      context: .
+      dockerfile: services/chat/Dockerfile
+    environment:
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-webchat}:${RABBITMQ_PASS:-webchat}@rabbitmq:5672
+      - AUTH_SERVICE_URL=http://auth:3001
+      - MESSAGES_SERVICE_URL=http://messages:3003
+      - JWT_SECRET=${JWT_SECRET}
+      - PORT_CHAT=5000
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173}
+    ports:
+      - "5000:5000"
+    depends_on:
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    deploy:
+      replicas: 3  # Scale horizontally — Redis adapter syncs socket events
+      restart_policy:
+        condition: on-failure
+    profiles:
+      - app
+
+  gateway:
+    build:
+      context: .
+      dockerfile: services/gateway/Dockerfile
+    environment:
+      - NODE_ENV=production
+      - AUTH_SERVICE_URL=http://auth:3001
+      - MESSAGES_SERVICE_URL=http://messages:3003
+      - CHAT_SERVICE_PUBLIC_URL=http://chat:5000
+      - UPLOADS_SERVICE_URL=http://uploads:3004
+      - PORT_GATEWAY=4000
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173}
+    ports:
+      - "4000:4000"
+    profiles:
+      - app
+
+  # ── Prometheus + Grafana ──────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deploy/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    profiles:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:10.4.3
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=webchat
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafdata:/var/lib/grafana
+      - ./deploy/monitoring/grafana-provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    profiles:
+      - monitoring
+
 volumes:
   pgdata:
   mongodata:
+  esdata:
+  promdata:
+  grafdata:
+  rabbitdata:
+  miniodata:

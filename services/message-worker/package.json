@@ -1,0 +1,20 @@
+{
+  "name": "@webchat/message-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "RabbitMQ consumer — persists chat messages to MongoDB and indexes them in Elasticsearch",
+  "scripts": {
+    "dev": "nodemon src/index.js",
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "amqplib": "^0.10.4",
+    "dotenv": "^17.2.2",
+    "mongoose": "^8.18.0",
+    "@elastic/elasticsearch": "^8.13.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  }
+}

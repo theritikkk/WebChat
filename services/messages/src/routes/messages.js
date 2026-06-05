@@ -2,26 +2,37 @@ import { Router } from "express";
 import { Message } from "../models/Message.js";
 import { assertRoomMember } from "../lib/membership.js";
 import { getUserFromBearer } from "../lib/jwt.js";
+import { indexMessage, searchMessages } from "../lib/elastic.js";
 
 export function messagesRouter() {
   const router = Router({ mergeParams: true });
 
+  // ─── GET /  — list or search messages ──────────────────────────────────────
   router.get("/", async (req, res) => {
     const { roomId } = req.params;
     const ok = await assertRoomMember(req.headers.authorization, roomId);
-    if (!ok) {
-      return res.status(403).json({ error: "Forbidden or invalid token" });
-    }
+    if (!ok) return res.status(403).json({ error: "Forbidden or invalid token" });
+
     const limit = Math.min(Number(req.query.limit) || 50, 200);
     const before = req.query.before;
+    const searchQuery = req.query.q?.trim();
+
+    // ── Elasticsearch full-text search ─────────────────────────────────────
+    if (searchQuery) {
+      const esResults = await searchMessages(roomId, searchQuery, limit);
+      if (esResults !== null) {
+        return res.json({ messages: esResults, source: "elasticsearch" });
+      }
+      // Fallback: MongoDB regex
+      const q = { room_id: roomId, deleted: false, content: { $regex: searchQuery, $options: "i" } };
+      const desc = await Message.find(q).sort({ timestamp: -1 }).limit(limit).lean();
+      return res.json({ messages: desc.reverse(), source: "mongodb-fallback" });
+    }
+
+    // ── Paginated history ──────────────────────────────────────────────────
     const q = { room_id: roomId, deleted: false };
-    if (before) {
-      q.timestamp = { $lt: new Date(before) };
-    }
-    const search = req.query.q?.trim();
-    if (search) {
-      q.content = { $regex: search, $options: "i" };
-    }
+    if (before) q.timestamp = { $lt: new Date(before) };
+
     const desc = await Message.find(q).sort({ timestamp: -1 }).limit(limit).lean();
     const chronological = desc.reverse();
     return res.json({
@@ -30,16 +41,15 @@ export function messagesRouter() {
     });
   });
 
+  // ─── POST /  — create a message ────────────────────────────────────────────
   router.post("/", async (req, res) => {
     const { roomId } = req.params;
     const ok = await assertRoomMember(req.headers.authorization, roomId);
-    if (!ok) {
-      return res.status(403).json({ error: "Forbidden or invalid token" });
-    }
+    if (!ok) return res.status(403).json({ error: "Forbidden or invalid token" });
+
     const user = getUserFromBearer(req);
-    if (!user?.id) {
-      return res.status(401).json({ error: "Invalid token" });
-    }
+    if (!user?.id) return res.status(401).json({ error: "Invalid token" });
+
     const { content = "", message_type = "text", file_url } = req.body;
     const doc = await Message.create({
       room_id: roomId,
@@ -47,9 +57,86 @@ export function messagesRouter() {
       username: user.username,
       message_type,
       content,
-      file_url
+      file_url,
+      status: "sent"
     });
+
+    // Index in Elasticsearch (non-blocking, best-effort)
+    indexMessage(doc).catch(() => {});
+
     return res.status(201).json(doc);
+  });
+
+  // ─── PATCH /:messageId/ack  — delivery acknowledgement ─────────────────────
+  router.patch("/:messageId/ack", async (req, res) => {
+    const { roomId, messageId } = req.params;
+    const ok = await assertRoomMember(req.headers.authorization, roomId);
+    if (!ok) return res.status(403).json({ error: "Forbidden" });
+
+    const user = getUserFromBearer(req);
+    if (!user?.id) return res.status(401).json({ error: "Invalid token" });
+
+    const now = new Date();
+    const msg = await Message.findOneAndUpdate(
+      { _id: messageId, room_id: roomId, "deliveries.user_id": { $ne: user.id } },
+      {
+        $push: { deliveries: { user_id: user.id, delivered_at: now } },
+        $set: { status: "delivered" }
+      },
+      { new: true }
+    );
+
+    // If the delivery record already exists, just update delivered_at
+    if (!msg) {
+      await Message.updateOne(
+        { _id: messageId, room_id: roomId, "deliveries.user_id": user.id },
+        { $set: { "deliveries.$.delivered_at": now }, status: "delivered" }
+      );
+    }
+
+    return res.json({ ok: true, status: "delivered", at: now });
+  });
+
+  // ─── PATCH /:messageId/read  — read receipt ────────────────────────────────
+  router.patch("/:messageId/read", async (req, res) => {
+    const { roomId, messageId } = req.params;
+    const ok = await assertRoomMember(req.headers.authorization, roomId);
+    if (!ok) return res.status(403).json({ error: "Forbidden" });
+
+    const user = getUserFromBearer(req);
+    if (!user?.id) return res.status(401).json({ error: "Invalid token" });
+
+    const now = new Date();
+
+    // Upsert: if no delivery record yet, insert one; otherwise update readAt
+    const existing = await Message.findOne({
+      _id: messageId,
+      room_id: roomId,
+      "deliveries.user_id": user.id
+    });
+
+    if (existing) {
+      await Message.updateOne(
+        { _id: messageId, "deliveries.user_id": user.id },
+        {
+          $set: {
+            "deliveries.$.read_at": now,
+            "deliveries.$.delivered_at": now,
+            status: "read"
+          }
+        }
+      );
+    } else {
+      await Message.updateOne(
+        { _id: messageId, room_id: roomId },
+        {
+          $push: { deliveries: { user_id: user.id, delivered_at: now, read_at: now } },
+          $set: { status: "read" }
+        }
+      );
+    }
+
+    return res.json({ ok: true, status: "read", at: now });
   });
 
   return router;

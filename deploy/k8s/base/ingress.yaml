@@ -33,3 +33,11 @@ spec:
                 name: chat
                 port:
                   number: 5000
+          - path: /metrics
+            pathType: Exact
+            backend:
+              service:
+                name: gateway
+                port:
+                  number: 4000
+

@@ -8,8 +8,8 @@ import http from "k6/http";
 import { check } from "k6";
 
 export const options = {
-  vus: 20,
-  duration: "30s"
+  vus: 100,
+  duration: "60s"
 };
 
 const GATEWAY = __ENV.GATEWAY || "http://127.0.0.1:4000";
