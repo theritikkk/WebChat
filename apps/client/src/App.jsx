@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:4000";
-const CHAT_URL  = import.meta.env.VITE_CHAT_URL  || "http://127.0.0.1:5000";
+const API_BASE = import.meta.env.VITE_API_BASE;
+const CHAT_URL  = import.meta.env.VITE_CHAT_URL;
 const STUN = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
 
 // ─── Tiny status-icon helper ──────────────────────────────────────────────────
@@ -264,7 +264,7 @@ export default function App() {
   // ── Auth actions ─────────────────────────────────────────────────────────
   async function register() {
     setStatus("…");
-    const r = await fetch(`${API_BASE}/api/v1/auth/register`, {
+    const r = await fetch(`${API_BASE}/v1/auth/register`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, username, password })
     });
@@ -277,7 +277,7 @@ export default function App() {
 
   async function login() {
     setStatus("…");
-    const r = await fetch(`${API_BASE}/api/v1/auth/login`, {
+    const r = await fetch(`${API_BASE}/v1/auth/login`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password })
     });

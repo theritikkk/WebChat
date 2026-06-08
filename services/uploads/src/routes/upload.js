@@ -14,7 +14,7 @@ import { Router } from "express";
 import { v4 as uuidv4 } from "uuid";
 import path from "path";
 import jwt from "jsonwebtoken";
-import { presignedPutUrl, presignedGetUrl, deleteObject, objectPublicUrl } from "../lib/s3.js"; // ← was minio.js
+import { presignedPutUrl, presignedGetUrl, deleteObject, objectPublicUrl } from "../lib/S3.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
 

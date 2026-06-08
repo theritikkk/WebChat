@@ -16,7 +16,7 @@ import morgan from "morgan";
 import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
-import { initS3 } from "./lib/s3.js";           // ← was minio.js
+import { initS3 } from "./lib/S3.js";           // ← was minio.js
 import { uploadsRouter } from "./routes/upload.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

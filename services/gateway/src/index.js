@@ -29,8 +29,15 @@ const origins = (process.env.CORS_ORIGINS || "http://localhost:5173")
 const app = express();
 app.set("trust proxy", 1);
 app.use(helmet());
-app.use(cors({ origin: origins.length ? origins : true, credentials: true }));
-app.use(express.json({ limit: "2mb" }));
+app.use(cors({
+  origin: [
+    "http://13.207.53.238",
+    "http://webchat.ritik-raj.com",
+    "http://localhost:5173"
+  ],
+  credentials: true
+}));
+// app.use(express.json({ limit: "2mb" }));
 app.use(morgan("combined"));
 
 // ── Prometheus instrumentation middleware ─────────────────────────────────────
@@ -80,8 +87,34 @@ const limiter = rateLimit({
 app.use("/api/", limiter);
 
 // ── Proxy targets ─────────────────────────────────────────────────────────────
-const messagesProxy = createProxyMiddleware({ target: MESSAGES_URL, changeOrigin: true });
-const authRoomsProxy = createProxyMiddleware({ target: AUTH_URL, changeOrigin: true });
+
+
+const authProxy = createProxyMiddleware({
+  target: AUTH_URL,
+  changeOrigin: true,
+  pathRewrite: (path, req) => {
+    return `/api/v1/auth${path}`;
+  }
+});
+
+const usersProxy = createProxyMiddleware({
+  target: AUTH_URL,
+  changeOrigin: true,
+  pathRewrite: (path, req) => {
+    return `/api/v1/users${path}`;
+  }
+});
+
+const messagesProxy = createProxyMiddleware({
+  target: MESSAGES_URL,
+  changeOrigin: true,
+  pathRewrite: (path, req) => {
+    return `/api/v1/rooms${path}`;
+  }
+});
+
+
+
 // Uploads proxy — only routes presign metadata; binary goes browser→MinIO directly
 const uploadsProxy = createProxyMiddleware({
   target: UPLOADS_URL,
@@ -95,17 +128,23 @@ const uploadsProxy = createProxyMiddleware({
 
 app.get("/health", (_req, res) => res.json({ ok: true, service: "gateway" }));
 
-app.use("/api/v1/auth", authRoomsProxy);
-app.use("/api/v1/users", authRoomsProxy);
+app.use("/api/v1/auth", authProxy);
+app.use("/api/v1/users", usersProxy);
+
 
 // ── File upload presigning → Uploads service ──────────────────────────────────
 app.use("/api/v1/upload", uploadsProxy);
 
 app.use("/api/v1/rooms", (req, res, next) => {
   const pathOnly = req.path.split("?")[0];
-  if (/\/messages(\/[^/]+)?\/?$/.test(pathOnly)) return messagesProxy(req, res, next);
-  return authRoomsProxy(req, res, next);
+
+  if (/\/messages(\/[^/]+)?\/?$/.test(pathOnly)) {
+    return messagesProxy(req, res, next);
+  }
+
+  return authProxy(req, res, next);
 });
+
 
 app.listen(PORT, () => {
   console.log(`[gateway] API gateway listening on ${PORT}`);
