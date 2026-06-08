@@ -55,24 +55,7 @@ services:
       timeout: 10s
       retries: 10
 
-  # ── Object Storage — MinIO ────────────────────────────────────────────────────
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER:     ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
-    ports:
-      - "9000:9000"    # S3 API
-      - "9001:9001"    # MinIO Console  →  http://localhost:9001
-    volumes:
-      - miniodata:/data
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
+  # ── Object Storage — AWS S3 (configured via env vars, no local container needed) ──
   # ── Elasticsearch + Kibana ────────────────────────────────────────────────────
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
@@ -169,27 +152,23 @@ services:
     profiles:
       - app
 
-  # ── Uploads Service (MinIO presigning) ────────────────────────────────────────
+  # ── Uploads Service (AWS S3 presigning) ──────────────────────────────────────
   uploads:
     build:
       context: .
       dockerfile: services/uploads/Dockerfile
     environment:
       - NODE_ENV=production
-      - MINIO_ENDPOINT=minio
-      - MINIO_PORT=9000
-      - MINIO_USE_SSL=false
-      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
-      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
-      - MINIO_BUCKET=${MINIO_BUCKET:-webchat-uploads}
+      - AWS_REGION=${AWS_REGION:-ap-south-1}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - S3_BUCKET=${S3_BUCKET:-webchat-uploads}
+      - S3_PUBLIC_BUCKET=${S3_PUBLIC_BUCKET:-false}
       - JWT_SECRET=${JWT_SECRET}
       - PORT_UPLOADS=3004
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173}
     ports:
       - "3004:3004"
-    depends_on:
-      minio:
-        condition: service_healthy
     profiles:
       - app
 
@@ -275,4 +254,3 @@ volumes:
   promdata:
   grafdata:
   rabbitdata:
-  miniodata:
