@@ -1,10 +1,10 @@
 /**
  * Uploads Service
  * ───────────────
- * Express app that handles file upload presigning for MinIO/S3.
+ * Express app that handles file upload presigning for AWS S3.
  *
  * Clients never POST binary data through this server — they receive a
- * presigned PUT URL and upload directly to MinIO, keeping this service
+ * presigned PUT URL and upload directly to S3, keeping this service
  * lightweight and stateless.
  */
 
@@ -16,7 +16,7 @@ import morgan from "morgan";
 import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
-import { initMinio } from "./lib/minio.js";
+import { initS3 } from "./lib/s3.js";           // ← was minio.js
 import { uploadsRouter } from "./routes/upload.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -50,10 +50,10 @@ app.use((err, _req, res, _next) => {
 // ── Bootstrap ──────────────────────────────────────────────────────────────────
 async function main() {
   try {
-    await initMinio();
+    await initS3();
   } catch (err) {
-    console.warn("[uploads] MinIO unavailable at startup:", err.message);
-    console.warn("[uploads] Uploads service will start anyway — MinIO must be up before presigning");
+    console.warn("[uploads] S3 unavailable at startup:", err.message);
+    console.warn("[uploads] Service will start anyway — S3 must be reachable before presigning");
   }
 
   http.createServer(app).listen(PORT, () => {
