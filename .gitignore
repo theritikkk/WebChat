@@ -3,4 +3,4 @@ node_modules/
 *.log
 apps/client/dist
 data/
-
+.env.production

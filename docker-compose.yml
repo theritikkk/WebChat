@@ -45,8 +45,8 @@ services:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-webchat}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-webchat}
     ports:
-      - "5672:5672"    # AMQP
-      - "15672:15672"  # Management UI  →  http://localhost:15672
+      - "5672:5672"
+      - "15672:15672"
     volumes:
       - rabbitdata:/var/lib/rabbitmq
     healthcheck:
@@ -55,7 +55,6 @@ services:
       timeout: 10s
       retries: 10
 
-  # ── Object Storage — AWS S3 (configured via env vars, no local container needed) ──
   # ── Elasticsearch + Kibana ────────────────────────────────────────────────────
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
@@ -89,11 +88,12 @@ services:
   auth:
     build:
       context: .
-      dockerfile: services/auth/Dockerfile
+      dockerfile: deploy/docker/Dockerfile
     environment:
+      - WEBCHAT_SERVICE=auth
       - NODE_ENV=production
       - DATABASE_URL=postgres://${POSTGRES_USER:-webchat}:${POSTGRES_PASSWORD:-webchat}@postgres:5432/${POSTGRES_DB:-webchat}
-      - JWT_SECRET=${JWT_SECRET}
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
       - JWT_ACCESS_EXPIRES=${JWT_ACCESS_EXPIRES:-15m}
       - JWT_REFRESH_EXPIRES=${JWT_REFRESH_EXPIRES:-7d}
       - PORT_AUTH=3001
@@ -109,13 +109,14 @@ services:
   messages:
     build:
       context: .
-      dockerfile: services/messages/Dockerfile
+      dockerfile: deploy/docker/Dockerfile
     environment:
+      - WEBCHAT_SERVICE=messages
       - NODE_ENV=production
       - MONGO_URI=mongodb://mongo:27017/webchat
       - REDIS_URL=redis://redis:6379
       - ELASTICSEARCH_URL=http://elasticsearch:9200
-      - JWT_SECRET=${JWT_SECRET}
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
       - AUTH_SERVICE_URL=http://auth:3001
       - PORT_MESSAGES=3003
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173}
@@ -139,16 +140,13 @@ services:
       - RABBITMQ_URL=amqp://${RABBITMQ_USER:-webchat}:${RABBITMQ_PASS:-webchat}@rabbitmq:5672
       - MONGO_URI=mongodb://mongo:27017/webchat
       - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - ES_INDEX=webchat-messages
+      - REDIS_URL=redis://redis:6379
     depends_on:
       mongo:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-    deploy:
-      replicas: 2  # Run 2 workers for parallel processing
-      restart_policy:
-        condition: on-failure
-        max_attempts: 5
     profiles:
       - app
 
@@ -164,7 +162,8 @@ services:
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - S3_BUCKET=${S3_BUCKET:-webchat-uploads}
       - S3_PUBLIC_BUCKET=${S3_PUBLIC_BUCKET:-false}
-      - JWT_SECRET=${JWT_SECRET}
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
+      - AUTH_SERVICE_URL=http://auth:3001
       - PORT_UPLOADS=3004
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173}
     ports:
@@ -175,14 +174,15 @@ services:
   chat:
     build:
       context: .
-      dockerfile: services/chat/Dockerfile
+      dockerfile: deploy/docker/Dockerfile
     environment:
+      - WEBCHAT_SERVICE=chat
       - NODE_ENV=production
       - REDIS_URL=redis://redis:6379
       - RABBITMQ_URL=amqp://${RABBITMQ_USER:-webchat}:${RABBITMQ_PASS:-webchat}@rabbitmq:5672
       - AUTH_SERVICE_URL=http://auth:3001
       - MESSAGES_SERVICE_URL=http://messages:3003
-      - JWT_SECRET=${JWT_SECRET}
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
       - PORT_CHAT=5000
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173}
     ports:
@@ -192,18 +192,15 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-    deploy:
-      replicas: 3  # Scale horizontally — Redis adapter syncs socket events
-      restart_policy:
-        condition: on-failure
     profiles:
       - app
 
   gateway:
     build:
       context: .
-      dockerfile: services/gateway/Dockerfile
+      dockerfile: deploy/docker/Dockerfile
     environment:
+      - WEBCHAT_SERVICE=gateway
       - NODE_ENV=production
       - AUTH_SERVICE_URL=http://auth:3001
       - MESSAGES_SERVICE_URL=http://messages:3003
