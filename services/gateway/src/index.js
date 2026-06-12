@@ -1,6 +1,8 @@
+import "./tracing.js"; // must be first — patches Node http/net before other imports
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
+import compression from "compression";
 import morgan from "morgan";
 import rateLimit from "express-rate-limit";
 import path from "path";
@@ -22,6 +24,7 @@ const PORT = Number(process.env.PORT_GATEWAY) || 4000;
 const AUTH_URL = process.env.AUTH_SERVICE_URL || "http://127.0.0.1:3001";
 const MESSAGES_URL = process.env.MESSAGES_SERVICE_URL || "http://127.0.0.1:3003";
 const UPLOADS_URL = process.env.UPLOADS_SERVICE_URL || "http://127.0.0.1:3004";
+const CHAT_URL = process.env.CHAT_SERVICE_PUBLIC_URL || "http://127.0.0.1:5000";
 
 const origins = (process.env.CORS_ORIGINS || "http://localhost:5173")
   .split(",").map((s) => s.trim()).filter(Boolean);
@@ -29,12 +32,9 @@ const origins = (process.env.CORS_ORIGINS || "http://localhost:5173")
 const app = express();
 app.set("trust proxy", 1);
 app.use(helmet());
+app.use(compression());
 app.use(cors({
-  origin: [
-    "http://13.207.53.238",
-    "http://webchat.ritik-raj.com",
-    "http://localhost:5173"
-  ],
+  origin: origins.length ? origins : true,
   credentials: true
 }));
 // app.use(express.json({ limit: "2mb" }));
@@ -58,8 +58,21 @@ app.use((req, res, next) => {
   next();
 });
 
-// ── Prometheus metrics endpoint ───────────────────────────────────────────────
-app.get("/metrics", async (_req, res) => {
+// ── Internal-only guard for /metrics ──────────────────────────────────────────
+function internalOnly(req, res, next) {
+  const ip = req.ip || req.socket?.remoteAddress || "";
+  const addr = ip.replace(/^::ffff:/, "");
+  const isLoopback = addr === "127.0.0.1" || addr === "::1" || addr === "localhost";
+  const isPrivate =
+    /^10\./.test(addr) ||
+    /^172\.(1[6-9]|2[0-9]|3[01])\./.test(addr) ||
+    /^192\.168\./.test(addr);
+  if (isLoopback || isPrivate) return next();
+  return res.status(403).json({ error: "Forbidden" });
+}
+
+// ── Prometheus metrics endpoint (internal only) ─────────────────────────────
+app.get("/metrics", internalOnly, async (_req, res) => {
   try {
     res.set("Content-Type", register.contentType);
     res.end(await register.metrics());
@@ -105,16 +118,6 @@ const usersProxy = createProxyMiddleware({
   }
 });
 
-const messagesProxy = createProxyMiddleware({
-  target: MESSAGES_URL,
-  changeOrigin: true,
-  pathRewrite: (path, req) => {
-    return `/api/v1/rooms${path}`;
-  }
-});
-
-
-
 // Uploads proxy — only routes presign metadata; binary goes browser→MinIO directly
 const uploadsProxy = createProxyMiddleware({
   target: UPLOADS_URL,
@@ -135,16 +138,40 @@ app.use("/api/v1/users", usersProxy);
 // ── File upload presigning → Uploads service ──────────────────────────────────
 app.use("/api/v1/upload", uploadsProxy);
 
-app.use("/api/v1/rooms", (req, res, next) => {
-  const pathOnly = req.path.split("?")[0];
-
-  if (/\/messages(\/[^/]+)?\/?$/.test(pathOnly)) {
-    return messagesProxy(req, res, next);
-  }
-
-  return authProxy(req, res, next);
+const roomsProxy = createProxyMiddleware({
+  target: AUTH_URL,
+  changeOrigin: true,
+  pathRewrite: (path) => `/api/v1/rooms${path}`,
 });
 
+const roomMessagesProxy = createProxyMiddleware({
+  target: MESSAGES_URL,
+  changeOrigin: true,
+  pathRewrite: (path, req) => {
+    const match = req.originalUrl.match(/\/api\/v1\/rooms(\/.+)/);
+    return `/api/v1/rooms${match ? match[1] : path}`;
+  },
+});
+
+app.use("/api/v1/rooms", (req, res, next) => {
+  const pathOnly = req.path.split("?")[0];
+  if (/\/messages/.test(pathOnly)) {
+    return roomMessagesProxy(req, res, next);
+  }
+  return roomsProxy(req, res, next);
+});
+
+// Presence queries → Chat service
+const presenceProxy = createProxyMiddleware({
+  target: CHAT_URL,
+  changeOrigin: true,
+  on: {
+    error: (_err, _req, res) => {
+      res.status(502).json({ error: "Chat service unavailable" });
+    }
+  }
+});
+app.use("/api/v1/presence", presenceProxy);
 
 app.listen(PORT, () => {
   console.log(`[gateway] API gateway listening on ${PORT}`);

@@ -17,6 +17,23 @@ import jwt from "jsonwebtoken";
 import { presignedPutUrl, presignedGetUrl, deleteObject, objectPublicUrl } from "../lib/S3.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
+const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL || "http://127.0.0.1:3001";
+
+// Refuse to start in production with a weak/default secret
+if (process.env.NODE_ENV === "production" && JWT_SECRET === "dev-secret-change-me") {
+  console.error(
+    "[FATAL] JWT_SECRET is set to the default dev value. " +
+    "Set a strong random secret (e.g. openssl rand -hex 64) before running in production."
+  );
+  process.exit(1);
+}
+
+async function assertRoomMember(authBearer, roomId) {
+  const res = await fetch(`${AUTH_SERVICE_URL}/api/v1/rooms/${roomId}`, {
+    headers: { Authorization: authBearer },
+  });
+  return res.ok;
+}
 
 // Allowed MIME types
 const ALLOWED_TYPES = new Set([
@@ -69,6 +86,12 @@ export function uploadsRouter() {
 
     if (!filename || !contentType || !roomId) {
       return res.status(400).json({ error: "filename, contentType, and roomId are required" });
+    }
+
+    const authHeader = req.headers.authorization || "";
+    const isMember = await assertRoomMember(authHeader, roomId);
+    if (!isMember) {
+      return res.status(403).json({ error: "Not a member of this room" });
     }
 
     if (!ALLOWED_TYPES.has(contentType)) {

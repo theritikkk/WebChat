@@ -12,6 +12,15 @@ const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL || "http://127.0.0.1:3001"
 const MESSAGES_SERVICE_URL = process.env.MESSAGES_SERVICE_URL || "http://127.0.0.1:3003";
 const REDIS_TTL = 60; // seconds
 
+// Refuse to start in production with a weak/default secret
+if (process.env.NODE_ENV === "production" && JWT_SECRET === "dev-secret-change-me") {
+  console.error(
+    "[FATAL] JWT_SECRET is set to the default dev value. " +
+    "Set a strong random secret (e.g. openssl rand -hex 64) before running in production."
+  );
+  process.exit(1);
+}
+
 // Shared Redis client for room-membership cache (set after connect)
 let _redis = null;
 
@@ -58,14 +67,14 @@ export async function assertRoomMember(authBearer, roomId, userId) {
   return isMember;
 }
 
-export async function persistMessage({ roomId, token, content, message_type }) {
+export async function persistMessage({ roomId, token, content, message_type, file_url }) {
   const res = await fetch(`${MESSAGES_SERVICE_URL}/api/v1/rooms/${roomId}/messages`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ content, message_type })
+    body: JSON.stringify({ content, message_type, file_url })
   });
   if (!res.ok) {
     const text = await res.text();

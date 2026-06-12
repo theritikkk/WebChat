@@ -141,4 +141,23 @@ router.get("/me", verifyJwt, async (req, res) => {
   return res.json(user);
 });
 
+/**
+ * POST /api/v1/auth/logout
+ * Revokes the provided refresh token so it cannot be reused.
+ * The client must also discard both tokens locally.
+ */
+router.post("/logout", body("refreshToken").notEmpty(), async (req, res) => {
+  const errors = validationResult(req);
+  // Tolerate missing body — still return 204 so client can clear local state
+  if (!errors.isEmpty()) return res.status(204).end();
+  try {
+    const { refreshToken: raw } = req.body;
+    const hash = hashRefreshToken(raw);
+    await RefreshToken.destroy({ where: { token_hash: hash } });
+  } catch {
+    // Non-fatal — even if deletion fails, respond OK so client clears tokens
+  }
+  return res.status(204).end();
+});
+
 export default router;

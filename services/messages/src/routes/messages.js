@@ -1,8 +1,20 @@
 import { Router } from "express";
+import sanitizeHtml from "sanitize-html";
 import { Message } from "../models/Message.js";
 import { assertRoomMember } from "../lib/membership.js";
 import { getUserFromBearer } from "../lib/jwt.js";
-import { indexMessage, searchMessages } from "../lib/elastic.js";
+import { indexMessage, searchMessages, deleteFromIndex } from "../lib/elastic.js";
+
+/**
+ * Sanitize user-supplied message content.
+ * Strips all HTML/script tags (XSS prevention) while preserving the plain text.
+ * A strict allowlist is used: no tags allowed at all for chat messages.
+ */
+function sanitizeContent(raw) {
+  if (!raw || typeof raw !== "string") return "";
+  // Strip ALL HTML — chat messages are plain text
+  return sanitizeHtml(raw, { allowedTags: [], allowedAttributes: {} }).trim();
+}
 
 export function messagesRouter() {
   const router = Router({ mergeParams: true });
@@ -51,12 +63,13 @@ export function messagesRouter() {
     if (!user?.id) return res.status(401).json({ error: "Invalid token" });
 
     const { content = "", message_type = "text", file_url } = req.body;
+    const sanitized = sanitizeContent(content);
     const doc = await Message.create({
       room_id: roomId,
       user_id: user.id,
       username: user.username,
       message_type,
-      content,
+      content: sanitized,
       file_url,
       status: "sent"
     });
@@ -137,6 +150,49 @@ export function messagesRouter() {
     }
 
     return res.json({ ok: true, status: "read", at: now });
+  });
+
+  // PATCH /:messageId — edit message (author only)
+  router.patch("/:messageId", async (req, res) => {
+    const { roomId, messageId } = req.params;
+    const ok = await assertRoomMember(req.headers.authorization, roomId);
+    if (!ok) return res.status(403).json({ error: "Forbidden" });
+
+    const user = getUserFromBearer(req);
+    if (!user?.id) return res.status(401).json({ error: "Invalid token" });
+
+    const { content } = req.body || {};
+    if (!content?.trim()) return res.status(400).json({ error: "content required" });
+    const sanitized = sanitizeContent(content);
+    if (!sanitized) return res.status(400).json({ error: "content required" });
+
+    const msg = await Message.findOneAndUpdate(
+      { _id: messageId, room_id: roomId, user_id: user.id, deleted: false },
+      { $set: { content: sanitized, edited: true } },
+      { new: true }
+    );
+    if (!msg) return res.status(404).json({ error: "Message not found" });
+    indexMessage(msg).catch(() => {});
+    return res.json(msg);
+  });
+
+  // DELETE /:messageId — soft delete (author only)
+  router.delete("/:messageId", async (req, res) => {
+    const { roomId, messageId } = req.params;
+    const ok = await assertRoomMember(req.headers.authorization, roomId);
+    if (!ok) return res.status(403).json({ error: "Forbidden" });
+
+    const user = getUserFromBearer(req);
+    if (!user?.id) return res.status(401).json({ error: "Invalid token" });
+
+    const msg = await Message.findOneAndUpdate(
+      { _id: messageId, room_id: roomId, user_id: user.id, deleted: false },
+      { $set: { deleted: true, content: "" } },
+      { new: true }
+    );
+    if (!msg) return res.status(404).json({ error: "Message not found" });
+    deleteFromIndex(messageId).catch(() => {});
+    return res.json({ ok: true, id: messageId });
   });
 
   return router;

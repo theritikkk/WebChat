@@ -1,3 +1,4 @@
+import "./tracing.js"; // must be first — patches Node http/net before other imports
 import http from "http";
 import express from "express";
 import cors from "cors";
@@ -43,6 +44,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(__dirname, "../../../.env") });
 
 const PORT    = Number(process.env.PORT_CHAT) || 5000;
+const CONFIRM_CHANNEL = "webchat:message:persisted";
 const origins = (process.env.CORS_ORIGINS || "http://localhost:5173")
   .split(",").map((s) => s.trim()).filter(Boolean);
 
@@ -56,8 +58,24 @@ app.use(morgan("dev"));
 
 app.get("/health", (_req, res) => res.json({ ok: true, service: "chat", instance: INSTANCE_ID }));
 
-// ── Prometheus metrics endpoint ───────────────────────────────────────────────
-app.get("/metrics", async (_req, res) => {
+// ── Internal-only guard for /metrics ──────────────────────────────────────────
+// Accepts requests from: loopback (127.x, ::1) and RFC-1918 private ranges.
+// In Kubernetes, pods communicate over private CIDR so this works cluster-wide.
+function internalOnly(req, res, next) {
+  const ip = req.ip || req.socket?.remoteAddress || "";
+  // Strip IPv6-mapped IPv4 prefix (::ffff:127.0.0.1 → 127.0.0.1)
+  const addr = ip.replace(/^::ffff:/, "");
+  const isLoopback = addr === "127.0.0.1" || addr === "::1" || addr === "localhost";
+  const isPrivate =
+    /^10\./.test(addr) ||
+    /^172\.(1[6-9]|2[0-9]|3[01])\./.test(addr) ||
+    /^192\.168\./.test(addr);
+  if (isLoopback || isPrivate) return next();
+  return res.status(403).json({ error: "Forbidden" });
+}
+
+// ── Prometheus metrics endpoint (internal only) ───────────────────────────────
+app.get("/metrics", internalOnly, async (_req, res) => {
   try {
     res.set("Content-Type", register.contentType);
     res.end(await register.metrics());
@@ -66,13 +84,25 @@ app.get("/metrics", async (_req, res) => {
   }
 });
 
-// ── Presence HTTP endpoint (for other services to query) ──────────────────────
-app.get("/api/v1/presence/:userId", async (req, res) => {
+// ── JWT bearer middleware for presence HTTP endpoints ─────────────────────────
+function requireBearerToken(req, res, next) {
+  try {
+    const token = req.headers.authorization?.slice(7);
+    if (!token) throw new Error("Missing token");
+    verifySocketToken(token);
+    next();
+  } catch {
+    res.status(401).json({ error: "Unauthorized" });
+  }
+}
+
+// ── Presence HTTP endpoints (authenticated) ───────────────────────────────────
+app.get("/api/v1/presence/:userId", requireBearerToken, async (req, res) => {
   const online = await isOnline(req.params.userId);
   return res.json({ userId: req.params.userId, online });
 });
 
-app.get("/api/v1/presence", async (_req, res) => {
+app.get("/api/v1/presence", requireBearerToken, async (_req, res) => {
   const userIds = await getOnlineUserIds();
   return res.json({ onlineCount: userIds.length, userIds });
 });
@@ -104,9 +134,23 @@ if (redisUrl) {
   presenceRedis = createClient({ url: redisUrl });
   presenceRedis.on("error", (err) => console.warn("[chat] Presence Redis error:", err.message));
   presenceRedis.connect()
-    .then(() => {
+    .then(async () => {
       initPresence(presenceRedis);
       console.log("[chat] Distributed presence enabled");
+
+      // Subscribe to worker confirmations (swap temp message IDs)
+      const subClient = presenceRedis.duplicate();
+      await subClient.connect();
+      await subClient.subscribe(CONFIRM_CHANNEL, (raw) => {
+        try {
+          const { tempId, roomId, message } = JSON.parse(raw);
+          if (!roomId || !message?._id) return;
+          io.to(roomId).emit("message_confirmed", { tempId, message });
+        } catch (err) {
+          console.warn("[chat] message_confirmed parse error:", err.message);
+        }
+      });
+      console.log("[chat] Message confirmation subscriber enabled");
     })
     .catch((err) => console.warn("[chat] Presence Redis unavailable:", err.message));
 }
@@ -231,7 +275,9 @@ io.on("connection", (socket) => {
       if (!queued) {
         // Synchronous HTTP fallback (original behaviour)
         const end   = messagePersistDuration.startTimer();
-        const saved = await persistMessage({ roomId, token, content: content ?? "", message_type });
+        const saved = await persistMessage({
+          roomId, token, content: content ?? "", message_type, file_url
+        });
         end();
         // Replace temp message with real persisted one
         io.to(roomId).emit("message_confirmed", {

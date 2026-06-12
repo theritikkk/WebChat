@@ -20,7 +20,18 @@ import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import amqplib from "amqplib";
 import mongoose from "mongoose";
+import { createClient } from "redis";
 import { Client as ESClient } from "@elastic/elasticsearch";
+import sanitizeHtml from "sanitize-html";
+
+/**
+ * Sanitize user-supplied message content before persisting.
+ * Strips ALL HTML tags — chat messages are plain text.
+ */
+function sanitizeContent(raw) {
+  if (!raw || typeof raw !== "string") return "";
+  return sanitizeHtml(raw, { allowedTags: [], allowedAttributes: {} }).trim();
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(__dirname, "../../../.env") });
@@ -29,7 +40,9 @@ dotenv.config({ path: path.join(__dirname, "../../../.env") });
 const RABBITMQ_URL   = process.env.RABBITMQ_URL   || "amqp://guest:guest@localhost:5672";
 const MONGO_URI      = process.env.MONGO_URI       || "mongodb://127.0.0.1:27017/webchat";
 const ES_URL         = process.env.ELASTICSEARCH_URL || "http://127.0.0.1:9200";
-const ES_INDEX       = process.env.ES_INDEX        || "webchat_messages";
+const ES_INDEX       = process.env.ES_INDEX        || "webchat-messages";
+const REDIS_URL      = process.env.REDIS_URL;
+const CONFIRM_CHANNEL = "webchat:message:persisted";
 const EXCHANGE       = "webchat.messages";
 const QUEUE          = "messages.persist";
 const DLX_EXCHANGE   = "webchat.messages.dlx";
@@ -69,6 +82,45 @@ const messageSchema = new mongoose.Schema(
 messageSchema.index({ room_id: 1, timestamp: -1 });
 
 let Message;
+
+// ── Redis publisher (notify chat service of persisted messages) ───────────────
+let redisPub = null;
+
+async function initRedis() {
+  if (!REDIS_URL) return;
+  try {
+    redisPub = createClient({ url: REDIS_URL });
+    redisPub.on("error", (err) => console.warn("[worker] Redis error:", err.message));
+    await redisPub.connect();
+    console.log("[worker] Redis publisher connected");
+  } catch (err) {
+    console.warn("[worker] Redis unavailable:", err.message);
+    redisPub = null;
+  }
+}
+
+async function notifyMessageConfirmed(tempId, roomId, doc) {
+  if (!redisPub || !tempId) return;
+  try {
+    await redisPub.publish(CONFIRM_CHANNEL, JSON.stringify({
+      tempId,
+      roomId,
+      message: {
+        _id:          doc._id.toString(),
+        room_id:      doc.room_id,
+        user_id:      doc.user_id,
+        username:     doc.username,
+        content:      doc.content,
+        message_type: doc.message_type,
+        file_url:     doc.file_url,
+        status:       doc.status || "sent",
+        timestamp:    doc.timestamp,
+      },
+    }));
+  } catch (err) {
+    console.warn("[worker] Redis publish error:", err.message);
+  }
+}
 
 // ── Elasticsearch client ────────────────────────────────────────────────────────
 let esClient = null;
@@ -153,7 +205,7 @@ async function connectAndConsume() {
     arguments: {
       "x-dead-letter-exchange":    DLX_EXCHANGE,
       "x-dead-letter-routing-key": ROUTING_KEY,
-      "x-message-ttl":             60_000, // 60 s — prevent unbounded accumulation
+      "x-message-ttl":             600_000, // 10 min — allow backlog under load
     },
   });
   await ch.bindQueue(QUEUE, EXCHANGE, ROUTING_KEY);
@@ -180,7 +232,7 @@ async function connectAndConsume() {
         user_id:      payload.userId,
         username:     payload.username,
         message_type: payload.message_type || "text",
-        content:      payload.content || "",
+        content:      sanitizeContent(payload.content || ""),
         file_url:     payload.file_url,
         status:       "sent",
         _via_queue:   true,
@@ -189,6 +241,9 @@ async function connectAndConsume() {
       // Best-effort ES index (non-blocking)
       indexInES(doc).catch(() => {});
 
+      // Notify chat service to swap temp IDs for real Mongo IDs
+      await notifyMessageConfirmed(payload.tempId, payload.roomId, doc);
+
       ch.ack(msg);
       console.log(`[worker] Persisted message ${doc._id} for room ${payload.roomId}`);
     } catch (err) {
@@ -196,18 +251,14 @@ async function connectAndConsume() {
 
       if (retries >= MAX_RETRIES) {
         console.warn(`[worker] Max retries (${MAX_RETRIES}) reached — sending to DLQ`);
-        ch.nack(msg, false, false); // → dead-letter queue
-      } else {
-        // Re-queue with incremented retry header
-        const headers = { ...(msg.properties.headers || {}), "x-retry-count": retries + 1 };
         ch.nack(msg, false, false);
-        // Re-publish with updated headers after a brief delay
-        setTimeout(() => {
-          ch.publish(EXCHANGE, ROUTING_KEY, msg.content, {
-            persistent: true,
-            headers,
-          });
-        }, 2_000 * (retries + 1));
+      } else {
+        const headers = { ...(msg.properties.headers || {}), "x-retry-count": retries + 1 };
+        ch.publish(EXCHANGE, ROUTING_KEY, msg.content, {
+          persistent: true,
+          headers,
+        });
+        ch.ack(msg);
       }
     }
   });
@@ -223,6 +274,9 @@ async function main() {
 
     // Elasticsearch
     await initElastic();
+
+    // Redis (message confirmation pub/sub)
+    await initRedis();
 
     // RabbitMQ
     await connectAndConsume();

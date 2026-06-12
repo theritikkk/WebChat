@@ -6,7 +6,7 @@
 import { Client } from "@elastic/elasticsearch";
 
 const ES_URL = process.env.ELASTICSEARCH_URL || "http://127.0.0.1:9200";
-const INDEX = "webchat-messages";
+const INDEX = process.env.ES_INDEX || "webchat-messages";
 
 let esClient = null;
 let esReady = false;
