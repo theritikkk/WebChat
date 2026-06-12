@@ -1,0 +1,317 @@
+# WebChat — production Docker Compose (single EC2, student budget)
+#
+# Usage:
+#   cp deploy/aws/.env.production.example .env.production
+#   docker compose -f deploy/aws/docker-compose.prod.yml --env-file .env.production up -d
+#
+# Scale chat replicas (Redis adapter required — included):
+#   docker compose -f deploy/aws/docker-compose.prod.yml --env-file .env.production up -d --scale chat=2
+#
+# Optional Elasticsearch (adds ~512MB RAM — skip on t3/t4g.micro):
+#   docker compose -f deploy/aws/docker-compose.prod.yml --env-file .env.production --profile search up -d
+#
+# Monitoring (Prometheus + Grafana + node-exporter):
+#   docker compose -f deploy/aws/docker-compose.prod.yml --env-file .env.production --profile monitoring up -d
+
+name: webchat-prod
+
+x-app-env: &app-env
+  NODE_ENV: production
+  JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+  JWT_ACCESS_EXPIRES: ${JWT_ACCESS_EXPIRES:-15m}
+  JWT_REFRESH_EXPIRES: ${JWT_REFRESH_EXPIRES:-7d}
+  CORS_ORIGINS: ${CORS_ORIGINS:?set CORS_ORIGINS}
+
+x-logging: &logging
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  # ── Edge (only public-facing service) ───────────────────────────────────────
+  nginx:
+    build:
+      context: ../..
+      dockerfile: deploy/aws/nginx/Dockerfile
+      args:
+        VITE_API_BASE: ${VITE_API_BASE:-}
+        VITE_CHAT_URL: ${VITE_CHAT_URL:-}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - certbot-webroot:/var/www/certbot:ro
+    depends_on:
+      gateway:
+        condition: service_started
+      chat:
+        condition: service_started
+    restart: unless-stopped
+    <<: *logging
+    mem_limit: 64m
+
+  # ── Data layer (NOT exposed to host — internal network only) ────────────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-webchat}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-webchat}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-webchat}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    <<: *logging
+    mem_limit: 256m
+    cpus: 0.5
+
+  mongo:
+    image: mongo:7
+    command: ["mongod", "--wiredTigerCacheSizeGB", "0.25"]
+    volumes:
+      - mongodata:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    <<: *logging
+    mem_limit: 384m
+    cpus: 0.5
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 64mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    <<: *logging
+    mem_limit: 96m
+
+  rabbitmq:
+    image: rabbitmq:3.13-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-webchat}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:?set RABBITMQ_PASS}
+    volumes:
+      - rabbitdata:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+    restart: unless-stopped
+    <<: *logging
+    mem_limit: 192m
+
+  # Optional — only enable with --profile search (needs t4g.small+)
+  elasticsearch:
+    profiles: [search]
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: -Xms256m -Xmx256m
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health"]
+      interval: 20s
+      timeout: 10s
+      retries: 8
+    restart: unless-stopped
+    <<: *logging
+    mem_limit: 512m
+
+  # ── Application services ────────────────────────────────────────────────────
+  auth:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    environment:
+      <<: *app-env
+      WEBCHAT_SERVICE: auth
+      DATABASE_URL: postgres://${POSTGRES_USER:-webchat}:${POSTGRES_PASSWORD}@${POSTGRES_HOST:-postgres}:5432/${POSTGRES_DB:-webchat}
+      PORT_AUTH: 3001
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    <<: *logging
+    mem_limit: 192m
+
+  messages:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    environment:
+      <<: *app-env
+      WEBCHAT_SERVICE: messages
+      MONGO_URI: mongodb://${MONGO_HOST:-mongo}:27017/webchat
+      REDIS_URL: redis://${REDIS_HOST:-redis}:6379
+      ELASTICSEARCH_URL: ${ELASTICSEARCH_URL:-}
+      ES_INDEX: ${ES_INDEX:-webchat-messages}
+      AUTH_SERVICE_URL: http://auth:3001
+      PORT_MESSAGES: 3003
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    <<: *logging
+    mem_limit: 192m
+
+  message-worker:
+    build:
+      context: ../..
+      dockerfile: services/message-worker/Dockerfile
+    environment:
+      NODE_ENV: production
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-webchat}:${RABBITMQ_PASS}@${RABBITMQ_HOST:-rabbitmq}:5672
+      MONGO_URI: mongodb://${MONGO_HOST:-mongo}:27017/webchat
+      ELASTICSEARCH_URL: ${ELASTICSEARCH_URL:-}
+      ES_INDEX: ${ES_INDEX:-webchat-messages}
+      REDIS_URL: redis://${REDIS_HOST:-redis}:6379
+    depends_on:
+      mongo:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    <<: *logging
+    mem_limit: 192m
+
+  uploads:
+    build:
+      context: ../..
+      dockerfile: services/uploads/Dockerfile
+    environment:
+      <<: *app-env
+      AWS_REGION: ${AWS_REGION:?set AWS_REGION}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:?set AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:?set AWS_SECRET_ACCESS_KEY}
+      S3_BUCKET: ${S3_BUCKET:?set S3_BUCKET}
+      S3_PUBLIC_BUCKET: ${S3_PUBLIC_BUCKET:-false}
+      AUTH_SERVICE_URL: http://auth:3001
+      PORT_UPLOADS: 3004
+    restart: unless-stopped
+    <<: *logging
+    mem_limit: 128m
+
+  chat:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    environment:
+      <<: *app-env
+      WEBCHAT_SERVICE: chat
+      REDIS_URL: redis://${REDIS_HOST:-redis}:6379
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-webchat}:${RABBITMQ_PASS}@${RABBITMQ_HOST:-rabbitmq}:5672
+      AUTH_SERVICE_URL: http://auth:3001
+      MESSAGES_SERVICE_URL: http://messages:3003
+      PORT_CHAT: 5000
+    depends_on:
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    <<: *logging
+    mem_limit: 256m
+
+  gateway:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    environment:
+      <<: *app-env
+      WEBCHAT_SERVICE: gateway
+      AUTH_SERVICE_URL: http://auth:3001
+      MESSAGES_SERVICE_URL: http://messages:3003
+      CHAT_SERVICE_PUBLIC_URL: http://chat:5000
+      UPLOADS_SERVICE_URL: http://uploads:3004
+      PORT_GATEWAY: 4000
+    depends_on:
+      - auth
+      - messages
+      - uploads
+    restart: unless-stopped
+    <<: *logging
+    mem_limit: 128m
+
+  # ── Monitoring (optional — --profile monitoring) ──────────────────────────
+  prometheus:
+    profiles: [monitoring]
+    image: prom/prometheus:v2.52.0
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --web.enable-lifecycle
+    restart: unless-stopped
+    <<: *logging
+    mem_limit: 128m
+
+  grafana:
+    profiles: [monitoring]
+    image: grafana/grafana:10.4.3
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?set GRAFANA_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000}
+    volumes:
+      - grafdata:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    <<: *logging
+    mem_limit: 128m
+
+  node-exporter:
+    profiles: [monitoring]
+    image: prom/node-exporter:v1.8.1
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+    restart: unless-stopped
+    mem_limit: 32m
+
+volumes:
+  pgdata:
+  mongodata:
+  redisdata:
+  rabbitdata:
+  esdata:
+  promdata:
+  grafdata:
+  certbot-webroot:
+
+networks:
+  default:
+    name: webchat-prod
