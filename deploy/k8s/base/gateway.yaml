@@ -22,18 +22,18 @@ spec:
             - sh
             - -c
             - |
-              until nc -z auth 3001; do echo waiting for auth; sleep 2; done
+              until nc -z auth.webchat.svc.cluster.local 3001; do echo waiting for auth; sleep 2; done
         - name: wait-messages
           image: busybox:1.36
           command:
             - sh
             - -c
             - |
-              until nc -z messages 3003; do echo waiting for messages; sleep 2; done
+              until nc -z messages.webchat.svc.cluster.local 3003; do echo waiting for messages; sleep 2; done
       containers:
         - name: gateway
           image: webchat-app:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Never
           ports:
             - containerPort: 4000
               name: http

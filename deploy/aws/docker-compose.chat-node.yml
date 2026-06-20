@@ -1,0 +1,27 @@
+# Optional overlay: run ONLY chat replicas on a second EC2 (Tier B)
+# On CORE host: expose Redis/RabbitMQ to private SG from chat node
+# On CHAT host:
+#   export CORE_HOST=10.0.1.50
+#   docker compose -f deploy/aws/docker-compose.chat-node.yml --env-file .env.production up -d --scale chat=2
+
+name: webchat-chat-node
+
+services:
+  chat:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    environment:
+      NODE_ENV: production
+      WEBCHAT_SERVICE: chat
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      REDIS_URL: redis://${CORE_HOST:?set CORE_HOST}:6379
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-webchat}:${RABBITMQ_PASS}@${CORE_HOST}:5672
+      AUTH_SERVICE_URL: http://${CORE_HOST}:3001
+      MESSAGES_SERVICE_URL: http://${CORE_HOST}:3003
+      PORT_CHAT: 5000
+      CORS_ORIGINS: ${CORS_ORIGINS:?set CORS_ORIGINS}
+    ports:
+      - "5000:5000"
+    restart: unless-stopped
+    mem_limit: 256m
