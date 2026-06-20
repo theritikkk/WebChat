@@ -1,6 +1,5 @@
-# WebChat 🚀
-
-A **production-ready**, horizontally-scalable real-time chat platform built with a Node.js microservices architecture.
+# WebChat
+A production-oriented, horizontally scalable real-time chat platform built with a Node.js microservices architecture.
 
 [![CI](https://github.com/theritikkk/WebChat/actions/workflows/ci.yml/badge.svg)](https://github.com/theritikkk/WebChat/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -9,47 +8,66 @@ A **production-ready**, horizontally-scalable real-time chat platform built with
 
 ## Architecture Overview
 
-```
-Browser / Client
-      │
-      ▼
-┌─────────────────────────────────────────────────────┐
-│  API Gateway  :4000  (rate-limit · proxy · CORS)    │
-└──────┬────────────┬──────────────┬──────────────────┘
-       │            │              │
-       ▼            ▼              ▼
-  Auth Service  Messages Svc  Uploads Svc
-    :3001          :3003          :3004
-  (Postgres)    (Mongo+ES)    (MinIO presign)
-                                   │
-       ┌───────────────────────────┘
-       │        Direct PUT (binary, bypasses app servers)
-       ▼
-  MinIO :9000  (S3-compatible object storage)
+```mermaid
+flowchart TB
+ subgraph Client["Browser (React + Vite)"]
+ UI[Chat UI]
+ WS[Socket.io Client]
+ UI --> WS
+ end
 
-Browser ──WebSocket──► Chat Service :5000 ×3 replicas
-                              │
-                 ┌────────────┴────────────────┐
-                 │  Redis :6379                 │
-                 │  • Socket.io adapter         │
-                 │  • Distributed presence      │
-                 │  • Membership cache          │
-                 └────────────┬────────────────┘
-                              │
-                              ▼
-                    RabbitMQ :5672  (durable queue)
-                              │
-                    ┌─────────▼──────────┐
-                    │  Message Worker    │  ×2 replicas
-                    │  (AMQP consumer)   │
-                    └─────────┬──────────┘
-                              │
-                    ┌─────────▼──────────┐
-                    │    MongoDB :27017   │
-                    └─────────┬──────────┘
-                              │
-                    Elasticsearch :9200  (full-text search)
+ subgraph Gateway["API Gateway :4000"]
+ RL[Rate Limit]
+ PX[Reverse Proxy]
+ MET[Prometheus /metrics]
+ end
+
+ subgraph Services["Microservices"]
+ AUTH[Auth :3001<br/>Postgres]
+ MSG[Messages :3003<br/>MongoDB + ES]
+ UPL[Uploads :3004<br/>S3 Presign]
+ CHAT[Chat :5000<br/>Socket.io + WebRTC]
+ WRK[Message Worker<br/>RabbitMQ Consumer]
+ end
+
+ subgraph Queue["Async Pipeline"]
+ RMQ[(RabbitMQ)]
+ end
+
+ subgraph Data["Data Layer"]
+ PG[(PostgreSQL)]
+ MG[(MongoDB)]
+ RD[(Redis)]
+ ES[(Elasticsearch)]
+ S3[(AWS S3)]
+ end
+
+ UI -->|REST JWT| Gateway
+ WS -->|WebSocket| CHAT
+ Gateway --> AUTH & MSG & UPL & CHAT
+ AUTH --> PG
+ MSG --> MG & ES
+ CHAT --> RD
+ CHAT -->|Publish Jobs| RMQ
+ RMQ -->|Consume| WRK
+ WRK --> MG & ES & RD
+ UI -->|Presigned PUT| S3
 ```
+
+### Request paths
+
+| Path | Flow |
+|------|------|
+| Auth | Client → Gateway → Auth → Postgres |
+| Messages | Client → Gateway → Messages → Mongo (+ Redis room cache) |
+| Search | Client → Gateway → Messages → Elasticsearch (Mongo fallback) |
+| Real-time | Client ↔ Chat (Socket.io) → Redis adapter for multi-pod |
+| Persist | Chat → RabbitMQ → Worker → Mongo + ES → Redis pub/sub → Chat confirms ID |
+| Uploads | Client → Gateway → Uploads presign → Client PUT → S3 |
+| Presence | Client → Gateway → Chat → Redis |
+| WebRTC | Client ↔ Chat signaling → P2P media |
+
+See [docs/ENGINEERING_AUDIT.md](docs/ENGINEERING_AUDIT.md) for the full architecture audit, dependency graph, and remediation roadmap.
 
 ---
 
@@ -57,12 +75,12 @@ Browser ──WebSocket──► Chat Service :5000 ×3 replicas
 
 | Service | Port | Description |
 |---------|------|-------------|
-| **gateway** | 4000 | Reverse proxy, rate limiting, CORS |
-| **auth** | 3001 | JWT auth, user management, rooms (Postgres) |
-| **messages** | 3003 | Message history, read receipts, ES search (Mongo) |
-| **chat** | 5000 | Socket.io real-time engine, WebRTC signaling |
-| **uploads** | 3004 | MinIO presigned URL generation for file uploads |
-| **message-worker** | — | RabbitMQ consumer → MongoDB + Elasticsearch |
+| gateway | 4000 | Reverse proxy, rate limiting, CORS |
+| auth | 3001 | JWT auth, user management, rooms (Postgres) |
+| messages | 3003 | Message history, read receipts, ES search (Mongo) |
+| chat | 5000 | Socket.io real-time engine, WebRTC signaling |
+| uploads | 3004 | AWS S3 presigned URL generation for file uploads |
+| message-worker | — | RabbitMQ consumer → MongoDB + Elasticsearch |
 
 ---
 
@@ -70,77 +88,70 @@ Browser ──WebSocket──► Chat Service :5000 ×3 replicas
 
 | Feature | Implementation |
 |---------|---------------|
-| ⚡ Real-time messaging | Socket.io with Redis adapter (multi-instance) |
-| 🌐 Distributed presence | Redis-backed cross-instance user online/offline |
-| 🐇 Message queue | RabbitMQ → Message Worker → MongoDB (async persist) |
-| 📁 File uploads | MinIO presigned PUT URLs — binary never hits app servers |
-| 🔍 Full-text search | Elasticsearch with MongoDB fallback |
-| 📞 WebRTC calls | Peer-to-peer video/audio via Socket.io signaling |
-| ✅ Read receipts | Per-user delivery + read tracking in MongoDB |
-| 🔒 Auth | JWT access (15 min) + refresh (7 day) tokens |
-| 📊 Metrics | Prometheus + Grafana dashboards |
-| 🔁 Horizontal scale | Chat ×3, Worker ×2, Redis adapter, HPA |
+| Real-time messaging | Socket.io with Redis adapter (multi-instance) |
+| Async message pipeline | RabbitMQ → Message Worker → MongoDB + ES → Redis pub/sub → Chat confirms |
+| Optimistic delivery | Temp IDs broadcast instantly; swapped for real Mongo `_id` on confirmation |
+| Distributed presence | Redis-backed cross-instance user online/offline (300s TTL + 60s heartbeat) |
+| File uploads | S3 presigned PUT URLs — binary never hits app servers |
+| Full-text search | Elasticsearch with MongoDB regex fallback |
+| WebRTC calls | Peer-to-peer video/audio via Socket.io signaling (Google STUN) |
+| Read receipts | IntersectionObserver → `mark_read` → per-user delivery tracking in MongoDB |
+| Auth | JWT access (15 min) + refresh (7 day) tokens, bcrypt (12 rounds) |
+| Metrics | Prometheus + Grafana dashboards (gateway, chat, messages); `/metrics` restricted to internal IPs |
+| Horizontal scale | Chat replicas, Worker replicas, Redis adapter, K8s HPA |
+| **Security** | Logout + token revocation, SQL migrations, presence auth, XSS sanitization, JWT startup guard, OTEL tracing |
 
 ---
 
 ## Quick Start (Local Dev)
 
 ### Prerequisites
-- Node.js ≥ 20
+
+- Node.js 20+
 - Docker + Docker Compose
 
-### 1 — Clone & configure
+### 1 — Clone and configure
+
 ```bash
 git clone https://github.com/theritikkk/WebChat.git
 cd WebChat
 cp .env.example .env
-# Edit .env — set a real JWT_SECRET
+# IMPORTANT: Edit .env and set a strong JWT_SECRET before running in production
+#     Run: openssl rand -hex 64
+#     Services will refuse to start with NODE_ENV=production + default secret
 ```
 
 ### 2 — Start infrastructure
+
 ```bash
-# Core services (Postgres, Mongo, Redis, RabbitMQ, MinIO, Elasticsearch)
-docker compose up -d postgres mongo redis rabbitmq minio elasticsearch
+docker compose up -d postgres mongo redis rabbitmq elasticsearch
+# RabbitMQ is required for the async message pipeline
 ```
 
 ### 3 — Install dependencies
+
 ```bash
 npm install
-cd services/auth       && npm install && cd ../..
-cd services/messages   && npm install && cd ../..
-cd services/chat       && npm install && cd ../..
-cd services/gateway    && npm install && cd ../..
-cd services/uploads    && npm install && cd ../..
-cd services/message-worker && npm install && cd ../..
 ```
 
-### 4 — Run all services
+### 4 — Run services
+
 ```bash
-# Terminal 1 — Auth
 PORT_AUTH=3001 node services/auth/src/index.js
-
-# Terminal 2 — Messages
 PORT_MESSAGES=3003 node services/messages/src/index.js
-
-# Terminal 3 — Message Worker (RabbitMQ consumer)
 node services/message-worker/src/index.js
-
-# Terminal 4 — Chat (Socket.io)
 PORT_CHAT=5000 node services/chat/src/index.js
-
-# Terminal 5 — Uploads
 PORT_UPLOADS=3004 node services/uploads/src/index.js
-
-# Terminal 6 — Gateway
 PORT_GATEWAY=4000 node services/gateway/src/index.js
-
-# Terminal 7 — Frontend
 cd apps/client && npm run dev
 ```
 
-**Or with the workspace:**
+Or use VS Code: Run > Run All Tasks (`.vscode/tasks.json`).
+
+### 5 — Full stack via Docker Compose
+
 ```bash
-# From VS Code: Run > Run All Tasks (defined in .vscode/tasks.json)
+docker compose --profile app up -d
 ```
 
 ---
@@ -149,19 +160,21 @@ cd apps/client && npm run dev
 
 ```
 send_message (Socket.io)
-        │
-        ├─► Optimistic broadcast to room (instant)
-        │
-        └─► publishMessage() → RabbitMQ "webchat.messages" exchange
-                                        │
-                             Message Worker consumes
-                                        │
-                             MongoDB.create() + ES.index()
-                                        │
-                             message_confirmed → room (final ID)
+ |
+ +-- Optimistic broadcast to room (instant)
+ |
+ +-- publishMessage() -> RabbitMQ "webchat.messages" exchange
+ |
+ Message Worker consumes
+ |
+ MongoDB.create() + ES.index()
+ |
+ Redis PUBLISH webchat:message:persisted
+ |
+ Chat service -> message_confirmed -> room (final ID)
 ```
 
-**Fallback**: If RabbitMQ is unavailable, the chat service transparently falls back to the original synchronous HTTP call to the messages service.
+If RabbitMQ is unavailable, the chat service falls back to synchronous HTTP persistence via the messages service.
 
 ---
 
@@ -169,60 +182,34 @@ send_message (Socket.io)
 
 ```
 1. Client: POST /api/v1/upload/presign { filename, contentType, roomId }
-2. Gateway → Uploads Service → generates MinIO presigned PUT URL (5 min TTL)
-3. Client: PUT <presignedUrl> <binary file>  (direct to MinIO — zero app server load)
-4. Client: send_message { roomId, file_url: "<public MinIO URL>", message_type: "image" }
+2. Gateway -> Uploads Service -> generates S3 presigned PUT URL (5 min TTL)
+3. Client: PUT <presignedUrl> <binary file> (direct to S3)
+4. Client: send_message { roomId, file_url, message_type: "image" }
 ```
-
----
-
-## Distributed Presence
-
-```
-User A connects to Chat-Pod-1
-  → Redis: SET presence:userA { socketId, instance, connectedAt } EX 300
-  → Redis: ZADD presence:online userA
-
-Chat-Pod-2 checks if User A is online:
-  → Redis: GET presence:userA → { ... } ✓ online
-
-User A disconnects from Chat-Pod-1:
-  → Redis: DEL presence:userA
-  → Redis: ZREM presence:online userA
-```
-
-Heartbeat every 60s refreshes the TTL so presence survives brief network blips.
 
 ---
 
 ## Kubernetes Deployment
 
 ```bash
-# Create namespace and apply all manifests
 kubectl apply -k deploy/k8s/base/
-
-# Verify pods
 kubectl get pods -n webchat
-
-# Scale workers horizontally
-kubectl scale deployment message-worker --replicas=4 -n webchat
-kubectl scale deployment chat --replicas=5 -n webchat
 ```
 
-See [`docs/KUBERNETES.md`](docs/KUBERNETES.md) for full deployment guide.
+See [docs/KUBERNETES.md](docs/KUBERNETES.md) and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ---
 
 ## Monitoring
 
 ```bash
-# Start Prometheus + Grafana
 docker compose --profile monitoring up -d
-
-# Grafana UI  → http://localhost:3000  (admin / webchat)
-# RabbitMQ UI → http://localhost:15672 (webchat / webchat)
-# MinIO UI    → http://localhost:9001  (minioadmin / minioadmin)
+# Grafana: http://localhost:3000 (admin / webchat)
+# Prometheus: http://localhost:9090
+# RabbitMQ UI: http://localhost:15672
 ```
+
+See [docs/MONITORING.md](docs/MONITORING.md).
 
 ---
 
@@ -233,37 +220,41 @@ docker compose --profile monitoring up -d
 | POST | `/api/v1/auth/register` | Register new user |
 | POST | `/api/v1/auth/login` | Login, returns access + refresh tokens |
 | POST | `/api/v1/auth/refresh` | Refresh access token |
+| POST | `/api/v1/auth/logout` | Revoke refresh token (server-side invalidation) |
 | GET | `/api/v1/rooms` | List user's rooms |
 | POST | `/api/v1/rooms` | Create a room |
+| POST | `/api/v1/rooms/:id/join` | Join a public room |
 | GET | `/api/v1/rooms/:id/messages` | Paginated message history |
 | GET | `/api/v1/rooms/:id/messages?q=term` | Full-text search |
 | POST | `/api/v1/upload/presign` | Get presigned upload URL |
-| GET | `/api/v1/upload/signed-url` | Get presigned download URL |
-| GET | `/api/v1/presence/:userId` | Check if user is online |
+| GET | `/api/v1/presence/:userId` | Check if user is online (JWT required) |
 
 ---
 
-## Environment Variables
+## Documentation
 
-See [`.env.example`](.env.example) for the full list. Key variables:
-
-| Variable | Description |
-|----------|-------------|
-| `JWT_SECRET` | Shared JWT signing key (all services) |
-| `REDIS_URL` | Redis for Socket.io adapter + presence |
-| `RABBITMQ_URL` | RabbitMQ for async message persistence |
-| `MINIO_*` | MinIO/S3 object storage credentials |
-| `ELASTICSEARCH_URL` | Full-text search engine |
-| `MONGO_URI` | Messages database |
-| `DATABASE_URL` | Auth database (Postgres) |
+| Document | Purpose |
+|----------|---------|
+| [docs/INTERVIEW_DEEP_DIVE.md](docs/INTERVIEW_DEEP_DIVE.md) | **Complete A-to-Z deep dive (interview prep)** |
+| [docs/CODEBASE_WALKTHROUGH.md](docs/CODEBASE_WALKTHROUGH.md) | **Comprehensive code-level guide to every service** |
+| [docs/RESUME_DEMO.md](docs/RESUME_DEMO.md) | **EKS demo + video recording guide (300+ users)** |
+| [docs/AWS_DEPLOYMENT.md](docs/AWS_DEPLOYMENT.md) | Low-cost single-EC2 deployment (~$6–15/mo) |
+| [docs/ENGINEERING_AUDIT.md](docs/ENGINEERING_AUDIT.md) | Full architecture audit and roadmap |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design deep dive with Mermaid diagrams |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Local dev + deployment + LinkedIn guide |
+| [docs/KUBERNETES.md](docs/KUBERNETES.md) | Kubernetes guide (kind/EKS) |
+| [docs/MONITORING.md](docs/MONITORING.md) | Observability guide (Prometheus/Grafana/k6) |
+| [docs/SECURITY.md](docs/SECURITY.md) | Security checklist |
+| [docs/DEPLOYMENT_CHALLENGES.md](docs/DEPLOYMENT_CHALLENGES.md) | Real-world deployment bugs solved on AWS EC2 |
 
 ---
 
 ## Tech Stack
 
-**Backend**: Node.js · Express · Socket.io · Mongoose · Sequelize  
-**Queues**: RabbitMQ (amqplib)  
-**Databases**: PostgreSQL · MongoDB · Redis · Elasticsearch  
-**Storage**: MinIO (S3-compatible)  
-**Infra**: Docker Compose · Kubernetes · GitHub Actions CI/CD  
-**Observability**: Prometheus · Grafana · k6 load testing
+**Backend**: Node.js, Express, Socket.io, Mongoose, Sequelize 
+**Queues**: RabbitMQ (amqplib) 
+**Databases**: PostgreSQL, MongoDB, Redis, Elasticsearch 
+**Storage**: AWS S3 
+**Infra**: Docker Compose, Kubernetes, GitHub Actions CI/CD 
+**Observability**: Prometheus, Grafana, OpenTelemetry (OTLP tracing), k6 load testing 
+**Security**: JWT + refresh token revocation, sanitize-html, SQL migrations, startup guards
