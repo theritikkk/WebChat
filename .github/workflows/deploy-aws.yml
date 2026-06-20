@@ -1,0 +1,46 @@
+name: Deploy AWS (Docker Compose)
+
+on:
+  workflow_dispatch:
+    inputs:
+      chat_replicas:
+        description: Number of chat replicas
+        required: false
+        default: "2"
+  push:
+    branches: [main]
+    paths:
+      - "apps/**"
+      - "services/**"
+      - "deploy/aws/**"
+      - ".github/workflows/deploy-aws.yml"
+
+concurrency:
+  group: deploy-aws
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            export APP_DIR=/opt/webchat
+            export DEPLOY_REF=${{ github.sha }}
+            export CHAT_REPLICAS=${{ github.event.inputs.chat_replicas || '2' }}
+            cd $APP_DIR
+            git fetch --all
+            git checkout ${{ github.sha }}
+            bash deploy/aws/scripts/deploy.sh
+
+      - name: Smoke test
+        run: |
+          curl -sf "https://${{ secrets.DEPLOY_DOMAIN }}/" -o /dev/null
+          curl -sf "https://${{ secrets.DEPLOY_DOMAIN }}/api/v1/auth/login" \
+            -X POST -H 'Content-Type: application/json' -d '{}' || true

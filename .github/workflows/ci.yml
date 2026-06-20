@@ -31,12 +31,13 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push unified app image
+      - name: Build unified app image
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -45,68 +46,78 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository }}/webchat-app:${{ github.sha }}
             ghcr.io/${{ github.repository }}/webchat-app:latest
-      # Also push service tags if required by specification
-      - name: Push service specific tags
-        if: github.event_name != 'pull_request'
-        run: |
-          for SERVICE in auth chat gateway messages; do
-            docker buildx build --platform linux/amd64 -f deploy/docker/Dockerfile -t ghcr.io/${{ github.repository }}/${SERVICE}:${{ github.sha }} --push .
-          done
+      - name: Build message-worker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: services/message-worker/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ghcr.io/${{ github.repository }}/message-worker:${{ github.sha }}
+      - name: Build uploads image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: services/uploads/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ghcr.io/${{ github.repository }}/uploads:${{ github.sha }}
 
   integration-test:
     runs-on: ubuntu-latest
-    needs: build-images
+    needs: lint-and-test
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Build local dev image
-        run: |
-          docker build -f deploy/docker/Dockerfile -t webchat-app:latest .
-      - name: Start services via Docker Compose
-        run: |
-          cp .env.example .env
-          docker compose up -d postgres mongo redis elasticsearch
-          # Run chat, gateway, auth, messages
-          # In local compose setup, we run services directly or via compose
-          # Let's ensure databases are healthy
-          echo "Waiting for databases to be ready..."
-          sleep 15
-      - name: Setup Node and run smoke test
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Start infrastructure
+        run: |
+          cp .env.example .env
+          docker compose up -d postgres mongo redis rabbitmq elasticsearch
+          echo "Waiting for databases..."
+          for i in $(seq 1 30); do
+            docker compose exec -T postgres pg_isready -U webchat && break
+            sleep 2
+          done
+      - name: Start application services
+        run: |
+          export $(grep -v '^#' .env | xargs)
+          PORT_AUTH=3001 node services/auth/src/index.js &
+          PORT_MESSAGES=3003 node services/messages/src/index.js &
+          node services/message-worker/src/index.js &
+          PORT_CHAT=5000 node services/chat/src/index.js &
+          PORT_GATEWAY=4000 node services/gateway/src/index.js &
+          sleep 8
+      - name: Smoke test gateway health
+        run: |
+          curl -sf http://127.0.0.1:4000/health
+          curl -sf http://127.0.0.1:5000/health
       - name: Run k6 smoke health test
         run: |
-          docker run --rm -i grafana/k6 run - <scripts/loadtest/k6-health.js
+          docker run --rm --network host -i grafana/k6 run - <scripts/loadtest/k6-health.js
 
   deploy:
     runs-on: ubuntu-latest
-    needs: integration-test
+    needs: [build-images, integration-test]
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     steps:
       - uses: actions/checkout@v4
       - name: Set up kubectl
         uses: azure/setup-kubectl@v3
-        with:
-          version: 'latest'
-      - name: Configure Kubeconfig
+      - name: Deploy to K8s cluster
         run: |
           if [ -z "${{ secrets.KUBE_CONFIG }}" ]; then
-            echo "KUBE_CONFIG secret is not set, skipping actual cluster deploy"
+            echo "KUBE_CONFIG not set — skipping cluster deploy"
             exit 0
           fi
           mkdir -p ~/.kube
           echo "${{ secrets.KUBE_CONFIG }}" > ~/.kube/config
-          kubectl config use-context default || true
-      - name: Deploy to K8s cluster
-        run: |
-          if [ -z "${{ secrets.KUBE_CONFIG }}" ]; then
-            echo "Mock deploy: kubectl set image deployment/gateway gateway=ghcr.io/${{ github.repository }}/gateway:${{ github.sha }}"
-            exit 0
-          fi
           kubectl set image deployment/gateway gateway=ghcr.io/${{ github.repository }}/webchat-app:${{ github.sha }} -n webchat
           kubectl set image deployment/auth auth=ghcr.io/${{ github.repository }}/webchat-app:${{ github.sha }} -n webchat
           kubectl set image deployment/messages messages=ghcr.io/${{ github.repository }}/webchat-app:${{ github.sha }} -n webchat
           kubectl set image deployment/chat chat=ghcr.io/${{ github.repository }}/webchat-app:${{ github.sha }} -n webchat
-          kubectl rollout status deployment/gateway -n webchat
+          kubectl set image deployment/message-worker message-worker=ghcr.io/${{ github.repository }}/message-worker:${{ github.sha }} -n webchat
+          kubectl set image deployment/uploads uploads=ghcr.io/${{ github.repository }}/uploads:${{ github.sha }} -n webchat
+          kubectl rollout status deployment/gateway -n webchat --timeout=120s
