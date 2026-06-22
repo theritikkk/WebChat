@@ -1,0 +1,12 @@
+# Placeholder — kustomization images: section overrides these at deploy time
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chat
+  namespace: webchat
+spec:
+  template:
+    spec:
+      containers:
+        - name: chat
+          imagePullPolicy: Always

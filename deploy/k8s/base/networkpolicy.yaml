@@ -25,7 +25,6 @@ spec:
     # Allow traffic from ingress controllers (public)
     - {}
   egress:
-    # Allow gateway to connect to auth and messages services
     - to:
         - podSelector:
             matchLabels:
@@ -38,6 +37,18 @@ spec:
               app: messages
       ports:
         - port: 3003
+    - to:
+        - podSelector:
+            matchLabels:
+              app: chat
+      ports:
+        - port: 5000
+    - to:
+        - podSelector:
+            matchLabels:
+              app: uploads
+      ports:
+        - port: 3004
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -74,6 +85,12 @@ spec:
               app: auth
       ports:
         - port: 3001
+    - to:
+        - podSelector:
+            matchLabels:
+              app: rabbitmq
+      ports:
+        - port: 5672
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -165,7 +182,12 @@ spec:
   podSelector:
     matchExpressions:
       - key: app
-        operator: In [postgres, mongo, redis, elasticsearch]
+        operator: In
+        values:
+          - postgres
+          - mongo
+          - redis
+          - elasticsearch
   policyTypes:
     - Ingress
     - Egress
@@ -196,6 +218,119 @@ spec:
               app: messages
       ports:
         - port: 6379
+    - from:
+        - podSelector:
+            matchLabels:
+              app: message-worker
+      ports:
+        - port: 27017
+        - port: 9200
+    - from:
+        - podSelector:
+            matchLabels:
+              app: message-worker
+      ports:
+        - port: 6379
+    - from:
+        - podSelector:
+            matchLabels:
+              app: rabbitmq
+      ports:
+        - port: 5672
   egress:
-    # Databases usually don't initiate egress connections except internally/DNS
     - {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: worker-policy
+  namespace: webchat
+spec:
+  podSelector:
+    matchLabels:
+      app: message-worker
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: rabbitmq
+      ports:
+        - port: 5672
+    - to:
+        - podSelector:
+            matchLabels:
+              app: mongo
+      ports:
+        - port: 27017
+    - to:
+        - podSelector:
+            matchLabels:
+              app: elasticsearch
+      ports:
+        - port: 9200
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - port: 6379
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: uploads-policy
+  namespace: webchat
+spec:
+  podSelector:
+    matchLabels:
+      app: uploads
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: gateway
+      ports:
+        - port: 3004
+  egress:
+    - {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: client-policy
+  namespace: webchat
+spec:
+  podSelector:
+    matchLabels:
+      app: client
+  policyTypes:
+    - Ingress
+  ingress:
+    - {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rabbitmq-policy
+  namespace: webchat
+spec:
+  podSelector:
+    matchLabels:
+      app: rabbitmq
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: chat
+        - podSelector:
+            matchLabels:
+              app: message-worker
+      ports:
+        - port: 5672

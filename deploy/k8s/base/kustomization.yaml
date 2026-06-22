@@ -9,12 +9,12 @@ resources:
   - mongo.yaml
   - redis.yaml
   - rabbitmq.yaml
-  - minio.yaml
   - elasticsearch.yaml
   - auth.yaml
   - messages.yaml
   - chat.yaml
   - gateway.yaml
+  - client.yaml
   - workers.yaml
   - ingress.yaml
   - monitoring.yaml
@@ -43,10 +43,12 @@ secretGenerator:
       - RABBITMQ_URL=amqp://webchat:replace-me-rabbit-password@rabbitmq:5672
     options:
       disableNameSuffixHash: true
-  - name: webchat-minio
+  - name: webchat-s3
     literals:
-      - MINIO_ACCESS_KEY=replace-me-minio-access-key
-      - MINIO_SECRET_KEY=replace-me-minio-secret-key
+      - AWS_REGION=ap-south-1
+      - AWS_ACCESS_KEY_ID=replace-me
+      - AWS_SECRET_ACCESS_KEY=replace-me
+      - S3_BUCKET=webchat-uploads
     options:
       disableNameSuffixHash: true
 
@@ -60,11 +62,9 @@ configMapGenerator:
       - MONGO_URI=mongodb://mongo:27017/webchat
       - CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,http://webchat.local
       - ELASTICSEARCH_URL=http://elasticsearch:9200
-      - ES_INDEX=webchat_messages
-      - MINIO_ENDPOINT=minio
-      - MINIO_PORT=9000
-      - MINIO_USE_SSL=false
-      - MINIO_BUCKET=webchat-uploads
+      - ES_INDEX=webchat-messages
+      - CHAT_SERVICE_PUBLIC_URL=http://chat:5000
+      - S3_PUBLIC_BUCKET=false
     options:
       disableNameSuffixHash: true
 

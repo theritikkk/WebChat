@@ -1,0 +1,35 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: webchat
+
+resources:
+  - ../../base
+
+# Remove MinIO — uploads use S3 in EKS demo
+patches:
+  - path: patches/replicas.yaml
+  - path: patches/ingress-host.yaml
+  - path: patches/images.yaml
+  - path: patches/gateway-env.yaml
+
+configMapGenerator:
+  - name: webchat-config
+    behavior: merge
+    literals:
+      - CORS_ORIGINS=https://webchat.demo.local,http://webchat.local
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+
+images:
+  - name: webchat-app
+    newName: REPLACE_ECR_REGISTRY/webchat-app
+    newTag: demo
+  - name: webchat-client
+    newName: REPLACE_ECR_REGISTRY/webchat-client
+    newTag: demo
+  - name: webchat-worker
+    newName: REPLACE_ECR_REGISTRY/webchat-worker
+    newTag: demo
+  - name: webchat-uploads
+    newName: REPLACE_ECR_REGISTRY/webchat-uploads
+    newTag: demo

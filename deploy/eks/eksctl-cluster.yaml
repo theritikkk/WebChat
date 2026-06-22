@@ -1,0 +1,52 @@
+# WebChat EKS demo cluster — record video, then delete cluster
+# Cost: ~$0.10/hr control plane + ~$0.12/hr for 3× t3.medium nodes ≈ $0.22/hr
+# A 3-hour demo session ≈ $0.66 + EBS (~$1)
+#
+# Create:  eksctl create cluster -f deploy/eks/eksctl-cluster.yaml
+# Delete:  eksctl delete cluster --name webchat-demo --region us-east-1
+
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: webchat-demo
+  region: us-east-1
+  version: "1.29"
+
+iam:
+  withOIDC: true
+
+managedNodeGroups:
+  - name: core
+    instanceType: t3.medium
+    desiredCapacity: 2
+    minSize: 2
+    maxSize: 4
+    volumeSize: 40
+    labels:
+      role: core
+    tags:
+      Project: webchat-demo
+
+  - name: scale
+    instanceType: t3.medium
+    desiredCapacity: 1
+    minSize: 1
+    maxSize: 2
+    volumeSize: 30
+    labels:
+      role: scale
+    tags:
+      Project: webchat-demo
+
+addons:
+  - name: vpc-cni
+    attachPolicyARNs:
+      - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+  - name: coredns
+  - name: kube-proxy
+
+cloudWatch:
+  clusterLogging:
+    enableTypes: []
+    # Disable control plane logs to save cost during demo

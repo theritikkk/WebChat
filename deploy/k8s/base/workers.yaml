@@ -28,8 +28,8 @@ spec:
       terminationGracePeriodSeconds: 60   # finish in-flight messages before shutdown
       containers:
         - name: message-worker
-          image: ghcr.io/theritikkk/webchat/message-worker:latest
-          imagePullPolicy: Always
+          image: webchat-worker:latest
+          imagePullPolicy: Never
           env:
             - name: NODE_ENV
               value: "production"
@@ -48,6 +48,16 @@ spec:
                 configMapKeyRef:
                   name: webchat-config
                   key: ELASTICSEARCH_URL
+            - name: ES_INDEX
+              valueFrom:
+                configMapKeyRef:
+                  name: webchat-config
+                  key: ES_INDEX
+            - name: REDIS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: webchat-config
+                  key: REDIS_URL
           resources:
             requests:
               cpu: "100m"
@@ -90,8 +100,8 @@ spec:
     spec:
       containers:
         - name: uploads
-          image: ghcr.io/theritikkk/webchat/uploads:latest
-          imagePullPolicy: Always
+          image: webchat-uploads:latest
+          imagePullPolicy: Never
           ports:
             - containerPort: 3004
           env:
@@ -99,24 +109,35 @@ spec:
               value: "production"
             - name: PORT_UPLOADS
               value: "3004"
-            - name: MINIO_ENDPOINT
-              value: "minio"
-            - name: MINIO_PORT
-              value: "9000"
-            - name: MINIO_USE_SSL
-              value: "false"
-            - name: MINIO_ACCESS_KEY
+            - name: AWS_REGION
               valueFrom:
                 secretKeyRef:
-                  name: webchat-minio
-                  key: MINIO_ACCESS_KEY
-            - name: MINIO_SECRET_KEY
+                  name: webchat-s3
+                  key: AWS_REGION
+                  optional: true
+            - name: AWS_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
-                  name: webchat-minio
-                  key: MINIO_SECRET_KEY
-            - name: MINIO_BUCKET
-              value: "webchat-uploads"
+                  name: webchat-s3
+                  key: AWS_ACCESS_KEY_ID
+                  optional: true
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: webchat-s3
+                  key: AWS_SECRET_ACCESS_KEY
+                  optional: true
+            - name: S3_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: webchat-s3
+                  key: S3_BUCKET
+                  optional: true
+            - name: S3_PUBLIC_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: webchat-config
+                  key: S3_PUBLIC_BUCKET
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:

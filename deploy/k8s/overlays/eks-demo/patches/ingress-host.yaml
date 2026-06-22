@@ -6,15 +6,9 @@ metadata:
   annotations:
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
-    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
-    # AWS ALB (optional — use eks-demo overlay patches)
-    # alb.ingress.kubernetes.io/scheme: internet-facing
-    # alb.ingress.kubernetes.io/target-type: ip
 spec:
-  ingressClassName: nginx
   rules:
-    - host: webchat.local
-      http:
+    - http:
         paths:
           - path: /socket.io
             pathType: Prefix
