@@ -28,6 +28,8 @@ jobs:
     needs: lint-and-test
     steps:
       - uses: actions/checkout@v4
+      - name: Lowercase repo name
+        run: echo "REPO_LOWER=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Log in to GitHub Container Registry
@@ -44,22 +46,22 @@ jobs:
           file: deploy/docker/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
           tags: |
-            ghcr.io/${{ github.repository }}/webchat-app:${{ github.sha }}
-            ghcr.io/${{ github.repository }}/webchat-app:latest
+            ghcr.io/${{ env.REPO_LOWER }}/webchat-app:${{ github.sha }}
+            ghcr.io/${{ env.REPO_LOWER }}/webchat-app:latest
       - name: Build message-worker image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: services/message-worker/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ghcr.io/${{ github.repository }}/message-worker:${{ github.sha }}
+          tags: ghcr.io/${{ env.REPO_LOWER }}/message-worker:${{ github.sha }}
       - name: Build uploads image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: services/uploads/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ghcr.io/${{ github.repository }}/uploads:${{ github.sha }}
+          tags: ghcr.io/${{ env.REPO_LOWER }}/uploads:${{ github.sha }}
 
   integration-test:
     runs-on: ubuntu-latest
@@ -83,7 +85,9 @@ jobs:
           done
       - name: Start application services
         run: |
-          export $(grep -v '^#' .env | xargs)
+          set -a
+          [ -f .env ] && . .env
+          set +a
           PORT_AUTH=3001 node services/auth/src/index.js &
           PORT_MESSAGES=3003 node services/messages/src/index.js &
           node services/message-worker/src/index.js &
@@ -104,6 +108,8 @@ jobs:
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     steps:
       - uses: actions/checkout@v4
+      - name: Lowercase repo name
+        run: echo "REPO_LOWER=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
       - name: Set up kubectl
         uses: azure/setup-kubectl@v3
       - name: Deploy to K8s cluster
@@ -114,10 +120,10 @@ jobs:
           fi
           mkdir -p ~/.kube
           echo "${{ secrets.KUBE_CONFIG }}" > ~/.kube/config
-          kubectl set image deployment/gateway gateway=ghcr.io/${{ github.repository }}/webchat-app:${{ github.sha }} -n webchat
-          kubectl set image deployment/auth auth=ghcr.io/${{ github.repository }}/webchat-app:${{ github.sha }} -n webchat
-          kubectl set image deployment/messages messages=ghcr.io/${{ github.repository }}/webchat-app:${{ github.sha }} -n webchat
-          kubectl set image deployment/chat chat=ghcr.io/${{ github.repository }}/webchat-app:${{ github.sha }} -n webchat
-          kubectl set image deployment/message-worker message-worker=ghcr.io/${{ github.repository }}/message-worker:${{ github.sha }} -n webchat
-          kubectl set image deployment/uploads uploads=ghcr.io/${{ github.repository }}/uploads:${{ github.sha }} -n webchat
+          kubectl set image deployment/gateway gateway=ghcr.io/${{ env.REPO_LOWER }}/webchat-app:${{ github.sha }} -n webchat
+          kubectl set image deployment/auth auth=ghcr.io/${{ env.REPO_LOWER }}/webchat-app:${{ github.sha }} -n webchat
+          kubectl set image deployment/messages messages=ghcr.io/${{ env.REPO_LOWER }}/webchat-app:${{ github.sha }} -n webchat
+          kubectl set image deployment/chat chat=ghcr.io/${{ env.REPO_LOWER }}/webchat-app:${{ github.sha }} -n webchat
+          kubectl set image deployment/message-worker message-worker=ghcr.io/${{ env.REPO_LOWER }}/message-worker:${{ github.sha }} -n webchat
+          kubectl set image deployment/uploads uploads=ghcr.io/${{ env.REPO_LOWER }}/uploads:${{ github.sha }} -n webchat
           kubectl rollout status deployment/gateway -n webchat --timeout=120s
