@@ -23,16 +23,21 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
+    # Promote secrets to env vars — secrets.* is not allowed in if: conditions,
+    # but env.* is. Empty string means "secret not set".
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_DOMAIN: ${{ secrets.DEPLOY_DOMAIN }}
     steps:
       - name: Skip notice — secrets not configured
-        if: ${{ !secrets.DEPLOY_HOST }}
+        if: env.DEPLOY_HOST == ''
         run: |
           echo "⚠️  DEPLOY_HOST secret is not set — skipping AWS deployment."
           echo "Add DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY, and DEPLOY_DOMAIN"
           echo "to your repository secrets to enable automatic AWS deployment."
 
       - name: Deploy over SSH
-        if: ${{ secrets.DEPLOY_HOST != '' }}
+        if: env.DEPLOY_HOST != ''
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.DEPLOY_HOST }}
@@ -48,7 +53,7 @@ jobs:
             bash deploy/aws/scripts/deploy.sh
 
       - name: Smoke test
-        if: ${{ secrets.DEPLOY_DOMAIN != '' }}
+        if: env.DEPLOY_DOMAIN != ''
         run: |
           curl -sf "https://${{ secrets.DEPLOY_DOMAIN }}/" -o /dev/null
           curl -sf "https://${{ secrets.DEPLOY_DOMAIN }}/api/v1/auth/login" \
