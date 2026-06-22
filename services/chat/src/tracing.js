@@ -26,7 +26,7 @@
 import { NodeSDK } from "@opentelemetry/sdk-node";
 import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
-import { Resource } from "@opentelemetry/resources";
+import { resourceFromAttributes } from "@opentelemetry/resources";
 import { SEMRESATTRS_SERVICE_NAME, SEMRESATTRS_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
 
 const SERVICE_NAME    = process.env.OTEL_SERVICE_NAME    || "webchat-chat";
@@ -35,7 +35,7 @@ const OTEL_ENABLED    = process.env.OTEL_ENABLED !== "false";
 
 if (OTEL_ENABLED) {
   const sdk = new NodeSDK({
-    resource: new Resource({
+    resource: resourceFromAttributes({
       [SEMRESATTRS_SERVICE_NAME]:    SERVICE_NAME,
       [SEMRESATTRS_SERVICE_VERSION]: "1.0.0",
     }),

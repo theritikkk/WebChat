@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, Fragment } from "react";
 import MessageBubble from "./MessageBubble";
 import { useDebounce } from "../hooks/useDebounce";
 
@@ -85,11 +85,11 @@ export default function ChatArea({
     return (
       <div className="chat-area">
         <div className="chat-mobile-bar">
-          <button type="button" className="icon-btn mobile-menu-btn" onClick={onMenuClick}>☰</button>
+          <button type="button" className="icon-btn mobile-menu-btn" onClick={onMenuClick}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></svg></button>
           <span className="chat-mobile-title">WebChat</span>
         </div>
         <div className="no-room">
-          <div className="no-room-illustration">💬</div>
+          <div className="no-room-illustration"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg></div>
           <div className="no-room-title">No room selected</div>
           <div className="no-room-desc">
             Pick a room from the sidebar or create a new one to start chatting.
@@ -109,12 +109,12 @@ export default function ChatArea({
       onDrop={handleDrop}
     >
       <div className="chat-header">
-        <button type="button" className="icon-btn mobile-menu-btn" onClick={onMenuClick}>☰</button>
+        <button type="button" className="icon-btn mobile-menu-btn" onClick={onMenuClick}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></svg></button>
         <div className="chat-header-avatar">{getInitials(room.name)}</div>
         <div className="chat-header-info">
           <div className="chat-header-name">{room.name}</div>
           <div className="chat-header-sub">
-            {room.room_type === "private" ? "🔒 Private" : "🌐 Public"}
+            {room.room_type === "private" ? <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle', marginRight: 4 }}><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>Private</> : <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle', marginRight: 4 }}><circle cx="12" cy="12" r="10" /><line x1="2" y1="12" x2="22" y2="12" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></svg>Public</>}
             {onlineCount > 0 && ` · ${onlineCount} online`}
           </div>
         </div>
@@ -125,9 +125,9 @@ export default function ChatArea({
             onClick={() => { setShowSearch((s) => !s); if (showSearch) onClearSearch(); }}
             title="Search messages"
           >
-            🔍
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
           </button>
-          <button type="button" className="icon-btn" onClick={onVideoCall} title="Video call">📹</button>
+          <button type="button" className="icon-btn" onClick={onVideoCall} title="Video call"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" /></svg></button>
           <div className={`conn-badge ${isConnected ? "connected" : "disconnected"}`}>
             <span className="conn-dot" />
             {isConnected ? "Live" : "Offline"}
@@ -138,7 +138,7 @@ export default function ChatArea({
       {showSearch && (
         <div className="search-bar-row">
           <div className="search-box" style={{ flex: 1 }}>
-            <span className="search-icon">⌕</span>
+            <span className="search-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg></span>
             <input
               className="search-input"
               placeholder="Search messages (Elasticsearch)…"
@@ -148,7 +148,7 @@ export default function ChatArea({
               autoFocus
             />
             {searchQ && (
-              <button type="button" className="search-clear" onClick={onClearSearch}>✕</button>
+              <button type="button" className="search-clear" onClick={onClearSearch}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg></button>
             )}
           </div>
           <button
@@ -165,7 +165,7 @@ export default function ChatArea({
       {searchQ && searchSource && (
         <div className="search-banner">
           <span>Results for &quot;<strong>{searchQ}</strong>&quot; via {searchSource} — {messages.length} found</span>
-          <button type="button" onClick={onClearSearch}>✕ Clear</button>
+          <button type="button" onClick={onClearSearch}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle', marginRight: 4 }}><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>Clear</button>
         </div>
       )}
 
@@ -194,7 +194,7 @@ export default function ChatArea({
           </div>
         ) : messages.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-icon">💬</div>
+            <div className="empty-icon"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg></div>
             <div className="empty-title">No messages yet</div>
             <div className="empty-desc">
               {searchQ ? "No messages match your search." : "Be the first to say something in this room!"}
@@ -210,7 +210,7 @@ export default function ChatArea({
               new Date(prev.created_at || prev.timestamp).toDateString()
             );
             return (
-              <div key={m._id}>
+              <Fragment key={m._id}>
                 {showDate && (m.created_at || m.timestamp) && (
                   <div className="date-sep">
                     {new Date(m.created_at || m.timestamp).toLocaleDateString([], {
@@ -225,7 +225,7 @@ export default function ChatArea({
                   observerRef={observerRef}
                   searchHighlight={searchQ}
                 />
-              </div>
+              </Fragment>
             );
           })
         )}
@@ -259,7 +259,7 @@ export default function ChatArea({
           ref={fileRef}
           type="file"
           className="sr-only"
-          accept="image/*,video/*,audio/*,.pdf,.txt,.zip"
+          accept="image/*,video/*,audio/*,application/pdf,.pdf,text/plain,.txt,application/zip,application/x-zip-compressed,.zip,.doc,.docx"
           onChange={handleFileSelect}
         />
         <div className="compose-bar">
@@ -270,7 +270,7 @@ export default function ChatArea({
             onClick={() => fileRef.current?.click()}
             disabled={uploading}
           >
-            📎
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>
           </button>
           <textarea
             ref={inputRef}
@@ -289,7 +289,7 @@ export default function ChatArea({
             disabled={!draft.trim() || uploading}
             title="Send"
           >
-            ➤
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
           </button>
         </div>
       </div>

@@ -16,7 +16,7 @@ export default function CreateRoomModal({ onConfirm, onClose }) {
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal">
-        <div className="modal-title">Create a Room</div>
+        <div className="modal-title"><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'><circle cx='12' cy='12' r='10'/><line x1='12' y1='8' x2='12' y2='16'/><line x1='8' y1='12' x2='16' y2='12'/></svg> Create a Room</div>
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">
@@ -33,31 +33,18 @@ export default function CreateRoomModal({ onConfirm, onClose }) {
 
           <div className="form-group">
             <label className="form-label">Type</label>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div className='room-type-toggle'>
               {["public", "private"].map(t => (
                 <button
                   key={t}
                   type="button"
                   onClick={() => setType(t)}
-                  style={{
-                    flex: 1,
-                    padding: "0.55rem",
-                    border: `1px solid ${type === t ? "var(--accent)" : "var(--border)"}`,
-                    borderRadius: "var(--radius)",
-                    background: type === t ? "var(--accent-dim)" : "var(--surface-2)",
-                    color: type === t ? "var(--accent)" : "var(--text-2)",
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                    fontSize: "0.85rem",
-                    fontWeight: 600,
-                    transition: "all var(--t)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 6,
-                  }}
+                  className={`room-type-btn ${type === t ? 'active' : ''}`}
                 >
-                  {t === "public" ? "🌐" : "🔒"} {t.charAt(0).toUpperCase() + t.slice(1)}
+                  {t === "public"
+                    ? <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'><circle cx='12' cy='12' r='10'/><line x1='2' y1='12' x2='22' y2='12'/><path d='M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z'/></svg>
+                    : <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'><rect x='3' y='11' width='18' height='11' rx='2' ry='2'/><path d='M7 11V7a5 5 0 0 1 10 0v4'/></svg>
+                  } {t.charAt(0).toUpperCase() + t.slice(1)}
                 </button>
               ))}
             </div>

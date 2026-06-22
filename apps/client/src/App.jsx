@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import "./styles.css";
 import AuthScreen from "./components/AuthScreen";
+import LandingPage from "./components/LandingPage";
 import Sidebar from "./components/Sidebar";
 import ChatArea from "./components/ChatArea";
 import VideoCall from "./components/VideoCall";
@@ -54,6 +55,14 @@ function ChatApp() {
   const [showCreate, setShowCreate] = useState(false);
   const [showJoin, setShowJoin] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showLanding, setShowLanding] = useState(!authed);
+
+  // Sync landing screen with authentication state
+  useEffect(() => {
+    if (authed) {
+      setShowLanding(false);
+    }
+  }, [authed]);
 
   const [searchQ, setSearchQ] = useState("");
   const [searching, setSearching] = useState(false);
@@ -245,19 +254,33 @@ function ChatApp() {
     };
   }, [token, addMessage, confirmMessage]);
 
-  // Join room on selection
+  // Join room on selection — sequential: join first, then load history
+  const joinedRoomRef = useRef(null);
   useEffect(() => {
     if (!socket || !roomId || !authed) return;
+    // Don't re-join if already joined this room on this socket
+    if (joinedRoomRef.current === roomId) {
+      loadHistory();
+      return;
+    }
     socket.emit("join_room", { roomId }, (ack) => {
       if (ack?.error) {
         toast(ack.error, "error");
         return;
       }
+      joinedRoomRef.current = roomId;
       localStorage.setItem("roomId", roomId);
       setUnread((u) => ({ ...u, [roomId]: 0 }));
       loadHistory();
     });
   }, [socket, roomId, authed, loadHistory, toast]);
+
+  // Reset joined room ref when socket reconnects
+  useEffect(() => {
+    if (!socket) {
+      joinedRoomRef.current = null;
+    }
+  }, [socket]);
 
   // Read receipts observer
   useEffect(() => {
@@ -312,6 +335,7 @@ function ChatApp() {
     setMessages([]);
     setRooms([]);
     setRoomId("");
+    setShowLanding(true);
     socketRef.current?.close();
   }
 
@@ -336,6 +360,7 @@ function ChatApp() {
   function handleSelectRoom(id) {
     if (socket && roomId && roomId !== id) {
       socket.emit("leave_room", { roomId });
+      joinedRoomRef.current = null; // force re-join for new room
     }
     setRoomId(id);
     setMessages([]);
@@ -358,17 +383,36 @@ function ChatApp() {
     setDraft("");
   }
 
+  // Extension-based MIME type fallback for files where browser sets type incorrectly
+  function getFileContentType(file) {
+    if (file.type && file.type !== 'application/octet-stream') return file.type;
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    const mimeMap = {
+      pdf: 'application/pdf', txt: 'text/plain', zip: 'application/zip',
+      png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+      gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml',
+      mp4: 'video/mp4', webm: 'video/webm', ogg: 'video/ogg',
+      mp3: 'audio/mpeg', doc: 'application/octet-stream',
+      docx: 'application/octet-stream',
+    };
+    return mimeMap[ext] || 'application/octet-stream';
+  }
+
   async function handleFileUpload(file) {
     if (!file || !roomId) return;
     setUploading(true);
     setUploadProgress(0);
     try {
-      const fileUrl = await uploadFile(file, roomId, setUploadProgress);
-      const isImage = file.type.startsWith("image/");
+      // Override file type for reliable MIME detection
+      const contentType = getFileContentType(file);
+      const fileBlob = new File([file], file.name, { type: contentType });
+      const fileUrl = await uploadFile(fileBlob, roomId, setUploadProgress);
+      const isImage = contentType.startsWith("image/");
+      const isVideo = contentType.startsWith("video/");
       handleSend(file.name, {
-        message_type: isImage ? "image" : "file",
+        message_type: isImage ? "image" : isVideo ? "video" : "file",
         file_url: fileUrl,
-        content: isImage ? "" : file.name,
+        content: isImage || isVideo ? "" : file.name,
       });
       toast("File sent", "success");
     } catch (err) {
@@ -394,7 +438,16 @@ function ChatApp() {
   }
 
   if (!authed) {
-    return <AuthScreen onLogin={handleLogin} onRegister={handleRegister} />;
+    if (showLanding) {
+      return <LandingPage onGetStarted={() => setShowLanding(false)} />;
+    }
+    return (
+      <AuthScreen
+        onLogin={handleLogin}
+        onRegister={handleRegister}
+        onBackToHome={() => setShowLanding(true)}
+      />
+    );
   }
 
   return (
