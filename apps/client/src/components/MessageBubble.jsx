@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { highlightText } from "../utils/message";
 
 function StatusTick({ status }) {
@@ -26,6 +27,10 @@ function formatTime(ts) {
 }
 
 function MessageContent({ message, searchHighlight }) {
+  if (message.deleted) {
+    return <span className="msg-content deleted-msg">This message was deleted</span>;
+  }
+
   if (message.message_type === "image" && message.file_url) {
     return (
       <a href={message.file_url} target="_blank" rel="noopener noreferrer" className="msg-image-link">
@@ -83,7 +88,20 @@ export default function MessageBubble({
   status,
   observerRef,
   searchHighlight,
+  onEdit,
+  onDelete,
 }) {
+  const [reactions, setReactions] = useState({});
+  const [showPicker, setShowPicker] = useState(false);
+
+  const toggleReaction = (emoji) => {
+    setReactions((prev) => ({
+      ...prev,
+      [emoji]: (prev[emoji] || 0) + 1,
+    }));
+    setShowPicker(false);
+  };
+
   return (
     <div
       className={`msg-row ${isOwn ? "own" : "other"}`}
@@ -98,10 +116,68 @@ export default function MessageBubble({
       )}
       <div className="msg-bubble">
         <MessageContent message={message} searchHighlight={searchHighlight} />
+        
+        {Object.keys(reactions).length > 0 && (
+          <div className="msg-reactions">
+            {Object.entries(reactions).map(([emoji, count]) => (
+              <span key={emoji} className="msg-reaction-badge">
+                {emoji} {count}
+              </span>
+            ))}
+          </div>
+        )}
+
         <div className="msg-bubble-footer">
+          {message.edited && <span className="msg-edited-tag">(edited)</span>}
           <span className="msg-time">{formatTime(message.created_at || message.timestamp)}</span>
           {isOwn && <StatusTick status={status} />}
+          
+          <div className="msg-actions-hover">
+            <button
+              type="button"
+              className="msg-action-btn"
+              title="Add reaction"
+              onClick={() => setShowPicker((v) => !v)}
+            >
+              😊
+            </button>
+            {isOwn && !message.deleted && (
+              <>
+                <button
+                  type="button"
+                  className="msg-action-btn"
+                  title="Edit message"
+                  onClick={() => onEdit?.(message)}
+                >
+                  ✏️
+                </button>
+                <button
+                  type="button"
+                  className="msg-action-btn"
+                  title="Delete message"
+                  onClick={() => onDelete?.(message)}
+                >
+                  🗑️
+                </button>
+              </>
+            )}
+          </div>
         </div>
+
+        {showPicker && (
+          <div className="reaction-picker-popover">
+            {["👍", "❤️", "😂", "🔥", "🎉"].map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                className="reaction-emoji-btn"
+                onClick={() => toggleReaction(emoji)}
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

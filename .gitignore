@@ -1,7 +1,13 @@
 node_modules/
 .env
+.env.production
 *.log
 apps/client/dist
 data/
-.env.production
-docs
+
+# Track architecture & engineering audit docs only, ignore internal preparation cue cards
+docs/*
+!docs/ARCHITECTURE.md
+!docs/ENGINEERING_AUDIT.md
+!docs/screenshots/
+

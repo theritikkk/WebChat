@@ -30,7 +30,8 @@ export function setAuthRedisClient(client) {
 
 export function verifySocketToken(token) {
   if (!token) throw new Error("Missing token");
-  const decoded = jwt.verify(token, JWT_SECRET);
+  const secret = process.env.JWT_SECRET || "dev-secret-change-me";
+  const decoded = jwt.verify(token, secret);
   if (decoded.typ === "refresh") throw new Error("Invalid token type");
   return { id: decoded.sub, email: decoded.email, username: decoded.username };
 }

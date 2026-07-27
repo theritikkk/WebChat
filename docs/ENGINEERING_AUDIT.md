@@ -18,7 +18,7 @@ WebChat is a well-structured microservices monorepo with real-time messaging, as
 | Security | B | JWT + logout revocation; migrations; metrics/presence secured; XSS sanitized; JWT guard |
 | K8s / Ops | C | Network policies and env vars were misaligned (fixed) |
 | Frontend | B- | Solid UI; missing virtualization, reactions, edit UI |
-| CI/CD | B | Pipeline improved; still no unit/socket tests |
+| CI/CD | B+ | Automated Jest + Supertest (Auth/Messages), single-instance Socket.io, and multi-instance Redis pub/sub scaling test suite running in CI before build steps |
 | Observability | B | Gateway/chat metrics; OpenTelemetry tracing added (4 services) |
 
 ---
@@ -165,9 +165,9 @@ flowchart LR
 - Group member management panel
 
 ### Ops
-- Unit and integration test suite
-- Socket.io integration tests
-- Secret scanning in CI (gitleaks)
+- [x] Unit and integration test suite — Jest + Supertest for Auth & Messages
+- [x] Socket.io integration tests for Chat service
+- [ ] Secret scanning in CI (gitleaks)
 - Container image scanning (Trivy)
 - Staging environment
 - Blue/green or canary deploys
@@ -320,7 +320,7 @@ flowchart LR
 
 ### P3 — Enterprise
 - [x] OpenTelemetry tracing — OTLP exporter in all 4 HTTP services
-- [ ] Integration test suite
+- [x] Integration test suite — Jest + Supertest for Auth/Messages, Socket.io for Chat in CI
 - [ ] Trivy + gitleaks in CI
 - [ ] Canary deployments
 

@@ -24,7 +24,8 @@ export function getUserFromBearer(req) {
     return null;
   }
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const secret = process.env.JWT_SECRET || "dev-secret-change-me";
+    const decoded = jwt.verify(token, secret);
     if (decoded.typ === "refresh") {
       return null;
     }

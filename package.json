@@ -2,6 +2,7 @@
   "name": "webchat",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "description": "Real-time multi-room chat — microservices monorepo",
   "workspaces": [
     "services/*",
@@ -9,7 +10,8 @@
   ],
   "scripts": {
     "dev": "concurrently -k -n gateway,auth,messages,chat -c blue,green,yellow,magenta \"npm run dev -w @webchat/gateway\" \"npm run dev -w @webchat/auth\" \"npm run dev -w @webchat/messages\" \"npm run dev -w @webchat/chat\"",
-    "dev:client": "npm run dev -w @webchat/client"
+    "dev:client": "npm run dev -w @webchat/client",
+    "test": "cross-env NODE_ENV=test NODE_OPTIONS=\"$NODE_OPTIONS --experimental-vm-modules\" jest --runInBand --forceExit"
   },
   "engines": {
     "node": ">=20"
@@ -20,7 +22,13 @@
   },
   "license": "ISC",
   "devDependencies": {
-    "concurrently": "^9.1.2"
+    "concurrently": "^9.1.2",
+    "cross-env": "^10.1.0",
+    "jest": "^30.4.2",
+    "mongodb-memory-server": "^11.2.0",
+    "socket.io-client": "^4.8.3",
+    "sqlite3": "^6.0.1",
+    "supertest": "^7.2.2"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1063.0",
