@@ -236,6 +236,9 @@ See [docs/MONITORING.md](docs/MONITORING.md).
 WebChat includes a comprehensive automated integration test suite executing unit, API, and multi-instance WebSocket scaling tests across all core microservices:
 
 ```bash
+# Start local Redis container (required for multi-instance socket scaling test)
+docker compose up -d redis
+
 # Run all test suites locally
 npm test
 ```

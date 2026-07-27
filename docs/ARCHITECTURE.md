@@ -334,8 +334,8 @@ graph TD
 
   Jest --> MultiPodTest[services/chat/test/chat-multi-instance.test.js]
   MultiPodTest --> PodA & PodB
-  PodA -->|@socket.io/redis-adapter| Redis7
-  PodB -->|@socket.io/redis-adapter| Redis7
+  PodA -->|"@socket.io/redis-adapter"| Redis7
+  PodB -->|"@socket.io/redis-adapter"| Redis7
 ```
 
 ### Multi-Instance Redis Adapter Verification
