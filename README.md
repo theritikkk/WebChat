@@ -196,7 +196,7 @@ kubectl apply -k deploy/k8s/base/
 kubectl get pods -n webchat
 ```
 
-See [docs/KUBERNETES.md](docs/KUBERNETES.md) and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+See [docs/PROJECT_GUIDE.md](docs/PROJECT_GUIDE.md) and [deploy/k8s/base/](deploy/k8s/base/).
 
 ---
 
@@ -209,7 +209,7 @@ docker compose --profile monitoring up -d
 # RabbitMQ UI: http://localhost:15672
 ```
 
-See [docs/MONITORING.md](docs/MONITORING.md).
+See [deploy/monitoring/](deploy/monitoring/).
 
 ---
 
@@ -263,6 +263,7 @@ The CI workflow ([.github/workflows/ci.yml](.github/workflows/ci.yml)) provision
 |----------|---------|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | **System design deep dive with Mermaid diagrams & C4 models** |
 | [docs/ENGINEERING_AUDIT.md](docs/ENGINEERING_AUDIT.md) | **Full architecture audit, security checklist, and roadmap** |
+| [docs/PROJECT_GUIDE.md](docs/PROJECT_GUIDE.md) | **Local testing, AWS deployment, resume bullets, and LinkedIn guide** |
 
 ---
 

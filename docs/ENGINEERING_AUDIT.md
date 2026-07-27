@@ -354,4 +354,4 @@ See `git diff` for full details. Key changes per phase:
 
 ## 16. Deployment Challenges Resolved
 
-During the AWS EC2 production deployment, 9 significant infrastructure bugs were identified and resolved. These span API gateway routing, Docker networking, WebSocket proxy configuration, SSL certificate management, JWT forwarding, and frontend build cache invalidation. Full details in [DEPLOYMENT_CHALLENGES.md](DEPLOYMENT_CHALLENGES.md).
+During the AWS EC2 production deployment, 9 significant infrastructure bugs were identified and resolved. These span API gateway routing, Docker networking, WebSocket proxy configuration, SSL certificate management, JWT forwarding, and frontend build cache invalidation. Full details in [PROJECT_GUIDE.md](PROJECT_GUIDE.md).
