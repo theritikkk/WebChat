@@ -231,21 +231,35 @@ See [docs/MONITORING.md](docs/MONITORING.md).
 
 ---
 
+## Testing & Verification
+
+WebChat includes a comprehensive automated integration test suite executing unit, API, and multi-instance WebSocket scaling tests across all core microservices:
+
+```bash
+# Run all test suites locally
+npm test
+```
+
+### Test Strategy & Topology
+
+| Service | Suite File | Strategy | Key Coverage |
+|---------|------------|----------|--------------|
+| **Auth** | `services/auth/test/auth.test.js` | `sqlite::memory:` | User registration, login, JWT validation, public rooms, room membership |
+| **Messages** | `services/messages/test/messages.test.js` | `mongodb-memory-server` | Message CRUD, HTML XSS sanitization (`sanitize-html`), pagination |
+| **Chat (Single)** | `services/chat/test/chat.test.js` | `socket.io-client` | Socket authentication, token rejection, `join_room`, disconnect cleanup |
+| **Chat (Multi-Pod)** | `services/chat/test/chat-multi-instance.test.js` | `@socket.io/redis-adapter` + Redis 7 | Spins up 2 independent Socket.io server pods on dynamic ports; verifies cross-instance real-time message delivery over Redis Pub/Sub |
+
+### GitHub Actions CI
+The CI workflow ([.github/workflows/ci.yml](.github/workflows/ci.yml)) provisions a real **Redis 7 service container** (`redis:7-alpine`) to gate `test-and-build` on 100% passing tests before client build and Docker image generation.
+
+---
+
 ## Documentation
 
 | Document | Purpose |
 |----------|---------|
-| [docs/INTERVIEW_DEEP_DIVE.md](docs/INTERVIEW_DEEP_DIVE.md) | **Complete A-to-Z deep dive (interview prep)** |
-| [docs/CODEBASE_WALKTHROUGH.md](docs/CODEBASE_WALKTHROUGH.md) | **Comprehensive code-level guide to every service** |
-| [docs/RESUME_DEMO.md](docs/RESUME_DEMO.md) | **EKS demo + video recording guide (300+ users)** |
-| [docs/AWS_DEPLOYMENT.md](docs/AWS_DEPLOYMENT.md) | Low-cost single-EC2 deployment (~$6–15/mo) |
-| [docs/ENGINEERING_AUDIT.md](docs/ENGINEERING_AUDIT.md) | Full architecture audit and roadmap |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design deep dive with Mermaid diagrams |
-| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Local dev + deployment + LinkedIn guide |
-| [docs/KUBERNETES.md](docs/KUBERNETES.md) | Kubernetes guide (kind/EKS) |
-| [docs/MONITORING.md](docs/MONITORING.md) | Observability guide (Prometheus/Grafana/k6) |
-| [docs/SECURITY.md](docs/SECURITY.md) | Security checklist |
-| [docs/DEPLOYMENT_CHALLENGES.md](docs/DEPLOYMENT_CHALLENGES.md) | Real-world deployment bugs solved on AWS EC2 |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | **System design deep dive with Mermaid diagrams & C4 models** |
+| [docs/ENGINEERING_AUDIT.md](docs/ENGINEERING_AUDIT.md) | **Full architecture audit, security checklist, and roadmap** |
 
 ---
 

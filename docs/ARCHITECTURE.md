@@ -299,3 +299,48 @@ graph LR
 ```
 
 All 4 HTTP services bootstrap OpenTelemetry as their **first import**, ensuring auto-instrumentation patches Node.js internals before any application code runs.
+
+---
+
+## Automated Testing & Multi-Instance Verification Architecture
+
+WebChat features a non-blocking integration test harness designed for local development speed and high-fidelity CI verification:
+
+```mermaid
+graph TD
+  subgraph Test Harness
+  Jest[Jest Runner / ES Modules]
+  end
+
+  subgraph In-Memory Data Strategy
+  SQLite[(sqlite::memory: Auth)]
+  MongoMem[(mongodb-memory-server Messages)]
+  end
+
+  subgraph Multi-Instance Socket Verification
+  PodA[Chat Instance A :portA]
+  PodB[Chat Instance B :portB]
+  Redis7[(Redis 7 Service Container :6379)]
+  end
+
+  Jest --> AuthTest[services/auth/test/auth.test.js]
+  AuthTest --> SQLite
+  
+  Jest --> MsgTest[services/messages/test/messages.test.js]
+  MsgTest --> MongoMem
+
+  Jest --> ChatTest[services/chat/test/chat.test.js]
+  ChatTest --> PodA
+
+  Jest --> MultiPodTest[services/chat/test/chat-multi-instance.test.js]
+  MultiPodTest --> PodA & PodB
+  PodA -->|@socket.io/redis-adapter| Redis7
+  PodB -->|@socket.io/redis-adapter| Redis7
+```
+
+### Multi-Instance Redis Adapter Verification
+
+To validate horizontal WebSocket scaling, `chat-multi-instance.test.js` spins up 2 independent Socket.io server instances on dynamic ports (`portA`, `portB`), both attached to `@socket.io/redis-adapter` over Redis.
+
+When Client 1 sends a message to Pod A, Pod A emits over Redis Pub/Sub, and Pod B receives and broadcasts the message to Client 2 on Pod B in real-time. This confirms multi-instance real-time fanout without single-instance bottlenecks.
+
