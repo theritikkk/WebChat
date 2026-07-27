@@ -9,5 +9,6 @@ data/
 docs/*
 !docs/ARCHITECTURE.md
 !docs/ENGINEERING_AUDIT.md
+!docs/PROJECT_GUIDE.md
 !docs/screenshots/
 
