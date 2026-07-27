@@ -105,6 +105,7 @@ app.use("/api/", limiter);
 const authProxy = createProxyMiddleware({
   target: AUTH_URL,
   changeOrigin: true,
+  pathRewrite: (path) => `/api/v1/auth${path}`,
 });
 
 const usersProxy = createProxyMiddleware({

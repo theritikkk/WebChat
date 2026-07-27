@@ -55,7 +55,9 @@ function ChatApp() {
   const [showCreate, setShowCreate] = useState(false);
   const [showJoin, setShowJoin] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [showLanding, setShowLanding] = useState(!authed);
+  
+  const authed = Boolean(token);
+  const [showLanding, setShowLanding] = useState(true);
 
   // Sync landing screen with authentication state
   useEffect(() => {
@@ -76,7 +78,6 @@ function ChatApp() {
   const roomIdRef = useRef(roomId);
   const userIdRef = useRef(userId);
 
-  const authed = Boolean(token);
   const activeRoom = rooms.find((r) => r.id === roomId) || null;
 
   useEffect(() => { roomIdRef.current = roomId; }, [roomId]);
